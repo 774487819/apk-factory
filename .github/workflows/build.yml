@@ -143,6 +143,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <!-- Only needed on Android 8-9 to read mobile-data usage -->
               <uses-permission android:name="android.permission.READ_PHONE_STATE"
                   android:maxSdkVersion="28" />
@@ -189,6 +190,16 @@ jobs:
                       android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
                       <intent-filter>
                           <action android:name="android.service.quicksettings.action.QS_TILE" />
+                      </intent-filter>
+                  </service>
+
+                  <!-- Local VPN used to block apps that reached their limit -->
+                  <service
+                      android:name=".BlockVpnService"
+                      android:exported="false"
+                      android:permission="android.permission.BIND_VPN_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.net.VpnService" />
                       </intent-filter>
                   </service>
 
@@ -272,9 +283,12 @@ jobs:
           import android.database.sqlite.SQLiteDatabase
           import android.database.sqlite.SQLiteOpenHelper
           import android.net.ConnectivityManager
+          import android.net.NetworkCapabilities
+          import android.net.VpnService
           import android.net.TrafficStats
           import android.net.Uri
           import android.os.Build
+          import android.os.ParcelFileDescriptor
           import android.os.Handler
           import android.os.IBinder
           import android.os.Looper
@@ -291,6 +305,7 @@ jobs:
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
           import java.io.File
+          import java.io.FileInputStream
           import java.text.SimpleDateFormat
           import java.util.Calendar
           import java.util.Date
@@ -455,7 +470,7 @@ jobs:
                   return r.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
               }
 
-              private fun alert(c: Context, pkg: String, level: Int, used: Long, limit: Long) {
+              private fun alert(c: Context, pkg: String, level: Int, used: Long, limit: Long, willBlock: Boolean = false) {
                   val name = appLabel(c, pkg)
                   val nm = c.getSystemService(NotificationManager::class.java)
                   ensureChannels(c)
@@ -467,8 +482,17 @@ jobs:
                   fun fill(s: String) = s.replace("{app}", name)
                       .replace("{pct}", (used * 100 / limit).toString())
                       .replace("{used}", fmt(used)).replace("{limit}", fmt(limit))
-                  val title = fill(if (warn) str(c, "wtitle", "{app}") else str(c, "atitle", "{app}"))
-                  val body = fill(if (warn) str(c, "wbody") else str(c, "abody"))
+                  val blockedNow = willBlock && !warn
+                  val title = fill(
+                      if (warn) str(c, "wtitle", "{app}")
+                      else if (blockedNow) str(c, "bk_title", "{app}")
+                      else str(c, "atitle", "{app}")
+                  )
+                  val body = fill(
+                      if (warn) str(c, "wbody")
+                      else if (blockedNow) str(c, "bk_body")
+                      else str(c, "abody")
+                  )
                   val n = NotificationCompat.Builder(c, CH_ALERTS)
                       .setSmallIcon(R.drawable.ic_stat_speed)
                       .setContentTitle(title)
@@ -499,7 +523,11 @@ jobs:
 
               private fun doCheck(c: Context) {
                   val l = limits(c)
-                  if (l.length() == 0 || !hasUsageAccess(c)) return
+                  if (l.length() == 0) {
+                      if (blockedSet(c).isNotEmpty()) { prefs(c).edit().remove("blocked").apply(); applyBlocking(c) }
+                      return
+                  }
+                  if (!hasUsageAccess(c)) return
                   val now = System.currentTimeMillis()
                   val pm = c.packageManager
                   val cache = HashMap<String, Map<Int, Use>>()
@@ -507,6 +535,10 @@ jobs:
                   val cutoff = now - 70L * 86_400_000L
                   val done = HashSet<String>(old.filter { (it.split("|").getOrNull(1)?.toLongOrNull() ?: 0L) > cutoff })
                   var changed = done.size != old.size
+                  val blocked = blockedSet(c)
+                  val unb = prefs(c).getStringSet("unblock", emptySet()) ?: emptySet()
+                  var blockChanged = false
+                  val canBlock = canBlockNow(c)
                   for (pkg in l.keys()) {
                       try {
                           val o = l.getJSONObject(pkg)
@@ -521,13 +553,112 @@ jobs:
                               pct < 100 -> 80
                               else -> 100 + (pct - 100) / 50 * 50
                           }
+                          val willBlock = o.optBoolean("block", false) && used >= limit && !unb.contains("$pkg|$start")
+                          if (willBlock) { if (blocked.add(pkg)) blockChanged = true }
+                          else if (blocked.remove(pkg)) blockChanged = true
                           if (level > 0 && done.add("$pkg|$start|$level")) {
                               changed = true
-                              alert(c, pkg, level, used, limit)
+                              alert(c, pkg, level, used, limit, willBlock && canBlock)
                           }
                       } catch (_: Exception) {}
                   }
+                  for (p in blocked.toList()) if (!l.has(p)) { blocked.remove(p); blockChanged = true }
                   if (changed) prefs(c).edit().putStringSet("notified", done).apply()
+                  if (blockChanged) prefs(c).edit().putStringSet("blocked", blocked).apply()
+                  if (blockChanged || blocked.isNotEmpty() || BlockVpnService.active) applyBlocking(c)
+              }
+
+              // ---------------- blocking (local VPN) ----------------
+              fun blockedSet(c: Context): MutableSet<String> =
+                  HashSet<String>(prefs(c).getStringSet("blocked", emptySet()) ?: emptySet())
+
+              /** "skip" = never disconnect the user's own VPN, "take" = replace it. */
+              fun vpnPolicy(c: Context): String = prefs(c).getString("vpn_policy", "skip") ?: "skip"
+
+              fun vpnGranted(c: Context): Boolean = try { VpnService.prepare(c) == null } catch (_: Exception) { false }
+
+              @Suppress("DEPRECATION")
+              fun otherVpnActive(c: Context): Boolean {
+                  if (BlockVpnService.active) return false
+                  return try {
+                      val cm = c.getSystemService(ConnectivityManager::class.java)
+                      cm.allNetworks.any {
+                          cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                      }
+                  } catch (_: Exception) { false }
+              }
+
+              private fun note(c: Context, id: Int, title: String, body: String) {
+                  ensureChannels(c)
+                  val pi = PendingIntent.getActivity(
+                      c, id,
+                      Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                  )
+                  val n = NotificationCompat.Builder(c, CH_ALERTS)
+                      .setSmallIcon(R.drawable.ic_stat_speed)
+                      .setContentTitle(title)
+                      .setContentText(body)
+                      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                      .setAutoCancel(true)
+                      .setContentIntent(pi)
+                      .build()
+                  try { c.getSystemService(NotificationManager::class.java).notify(id, n) } catch (_: Exception) {}
+              }
+
+              /** Blocking could not be enforced (permission missing / another VPN active): tell the user once a day per app. */
+              private fun warnVpn(c: Context, blocked: Set<String>) {
+                  val done = HashSet<String>(prefs(c).getStringSet("notified", emptySet()) ?: emptySet())
+                  val day = dayStart()
+                  var changed = false
+                  for (pkg in blocked) {
+                      if (!done.add("$pkg|$day|v")) continue
+                      changed = true
+                      val name = appLabel(c, pkg)
+                      note(c, "v$pkg".hashCode(),
+                          str(c, "bkv_title", "{app}").replace("{app}", name),
+                          str(c, "bkv_body").replace("{app}", name))
+                  }
+                  if (changed) prefs(c).edit().putStringSet("notified", done).apply()
+              }
+
+              fun notifyRevoked(c: Context) {
+                  val blocked = blockedSet(c)
+                  if (blocked.isEmpty()) return
+                  val names = blocked.joinToString(", ") { appLabel(c, it) }
+                  note(c, 9001,
+                      str(c, "bkv_title", "{app}").replace("{app}", names),
+                      str(c, "bkv_body").replace("{app}", names))
+              }
+
+              /** Can we enforce blocking right now without surprising the user? */
+              fun canBlockNow(c: Context): Boolean =
+                  vpnGranted(c) && !(otherVpnActive(c) && vpnPolicy(c) != "take")
+
+              /** Starts / refreshes / stops the blocker so it matches the "blocked" set. Safe to call from anywhere. */
+              fun applyBlocking(c: Context) {
+                  val ctx = c.applicationContext
+                  val blocked = blockedSet(ctx)
+                  if (blocked.isEmpty()) {
+                      if (BlockVpnService.active) {
+                          try { ctx.startService(Intent(ctx, BlockVpnService::class.java)) } catch (_: Exception) {}
+                      }
+                      return
+                  }
+                  if (!canBlockNow(ctx)) { warnVpn(ctx, blocked); return }
+                  try { ctx.startService(Intent(ctx, BlockVpnService::class.java)) } catch (_: Exception) {}
+              }
+
+              /** Lifts the block on [pkg] until its current period ends. */
+              fun unblock(c: Context, pkg: String) {
+                  val o = limits(c).optJSONObject(pkg)
+                  val start = periodStart(c, o?.optString("period", "month") ?: "month")
+                  val un = HashSet<String>(prefs(c).getStringSet("unblock", emptySet()) ?: emptySet())
+                  un.add("$pkg|$start")
+                  val b = blockedSet(c)
+                  b.remove(pkg)
+                  prefs(c).edit().putStringSet("unblock", un).putStringSet("blocked", b).apply()
+                  applyBlocking(c)
               }
 
               // ---------------- background monitor ----------------
@@ -660,6 +791,11 @@ jobs:
               }
 
               fun totals(c: Context, s: Long, e: Long) = pkgTotals(c, TOTAL, s, e)
+
+              /** Start of the earliest day stored in the history (0 when nothing is stored yet). */
+              fun firstDay(c: Context): Long {
+                  db(c).rawQuery("SELECT MIN(day) FROM daily", null).use { return if (it.moveToFirst()) it.getLong(0) else 0L }
+              }
 
               fun perPkg(c: Context, s: Long, e: Long): Map<String, LongArray> {
                   val out = HashMap<String, LongArray>()
@@ -897,8 +1033,88 @@ jobs:
               }
           }
 
+          // ---------------------------------------------------------------- BlockVpnService
+          /**
+           * Local "black-hole" VPN. Only the blocked apps are routed into the tunnel (addAllowedApplication);
+           * every packet they send is read and dropped, so they have no internet. All other apps are untouched.
+           * The tunnel exists only while at least one app is blocked, so it does not hold the VPN slot otherwise.
+           */
+          class BlockVpnService : VpnService() {
+              companion object { @Volatile var active = false }
+
+              private var pfd: ParcelFileDescriptor? = null
+              private var current: Set<String> = emptySet()
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val want = Core.blockedSet(this)
+                  if (want.isEmpty()) { teardown(); stopSelf(); return START_NOT_STICKY }
+                  if (pfd == null || want != current) establishFor(want)
+                  return START_STICKY
+              }
+
+              private fun establishFor(want: Set<String>) {
+                  teardown()
+                  val b = Builder()
+                      .setSession("Dataly")
+                      .addAddress("10.255.0.2", 32)
+                      .addAddress("fd00:da7a::2", 128)
+                      .addRoute("0.0.0.0", 0)
+                      .addRoute("::", 0)
+                      .setMtu(1500)
+                      .setBlocking(true)
+                  var n = 0
+                  for (p in want) { try { b.addAllowedApplication(p); n++ } catch (_: Exception) {} }
+                  if (n == 0) { stopSelf(); return }
+                  val f = try { b.establish() } catch (_: Exception) { null } ?: return
+                  pfd = f
+                  current = HashSet<String>(want)
+                  active = true
+                  Thread { drain(f) }.apply { isDaemon = true; start() }
+              }
+
+              private fun drain(f: ParcelFileDescriptor) {
+                  val input = FileInputStream(f.fileDescriptor)
+                  val buf = ByteArray(32767)
+                  try { while (input.read(buf) >= 0) { /* drop every packet */ } } catch (_: Exception) {}
+              }
+
+              private fun teardown() {
+                  active = false
+                  try { pfd?.close() } catch (_: Exception) {}
+                  pfd = null
+                  current = emptySet()
+              }
+
+              // Another VPN app took over the VPN slot.
+              override fun onRevoke() {
+                  teardown()
+                  Core.notifyRevoked(this)
+                  stopSelf()
+                  super.onRevoke()
+              }
+
+              override fun onDestroy() {
+                  teardown()
+                  super.onDestroy()
+              }
+          }
+
           // ---------------------------------------------------------------- MainActivity
           class MainActivity : FlutterActivity() {
+              private var pendingVpn: MethodChannel.Result? = null
+
+              @Suppress("DEPRECATION")
+              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+                  if (requestCode == 4711) {
+                      val r = pendingVpn
+                      pendingVpn = null
+                      val ok = resultCode == RESULT_OK
+                      try { r?.success(ok) } catch (_: Exception) {}
+                      if (ok) { val ctx = applicationContext; Thread { Core.applyBlocking(ctx) }.start() }
+                      return
+                  }
+                  super.onActivityResult(requestCode, resultCode, data)
+              }
 
               /** Runs [f] on a worker thread; always answers the channel (success or error, never null-on-failure). */
               private fun bg(res: MethodChannel.Result, f: () -> Any?) {
@@ -961,6 +1177,8 @@ jobs:
                                       "speed" to p.getBoolean("speed", false),
                                       "lang" to (p.getString("lang", "") ?: ""),
                                       "bill" to Core.billingDay(ctx),
+                                      "vpn_policy" to Core.vpnPolicy(ctx),
+                                      "hist_start" to History.firstDay(ctx),
                                       "sdk" to Build.VERSION.SDK_INT
                                   ))
                               }
@@ -1074,11 +1292,44 @@ jobs:
                                           out[pkg] = mapOf(
                                               "used" to Core.usedFor(ctx, o, uid, cache, now),
                                               "start" to st,
-                                              "end" to Core.periodEnd(per, st)
+                                              "end" to Core.periodEnd(per, st),
+                                              "blocked" to Core.blockedSet(ctx).contains(pkg)
                                           )
                                       } catch (_: Exception) {}
                                   }
                                   out
+                              }
+
+                              "vpnState" -> bg(res) {
+                                  mapOf(
+                                      "granted" to Core.vpnGranted(ctx),
+                                      "active" to BlockVpnService.active,
+                                      "other" to Core.otherVpnActive(ctx),
+                                      "policy" to Core.vpnPolicy(ctx)
+                                  )
+                              }
+
+                              "prepareVpn" -> {
+                                  val i = VpnService.prepare(this)
+                                  if (i == null) res.success(true)
+                                  else {
+                                      pendingVpn?.let { try { it.success(false) } catch (_: Exception) {} }
+                                      pendingVpn = res
+                                      try { startActivityForResult(i, 4711) }
+                                      catch (_: Exception) { pendingVpn = null; res.success(false) }
+                                  }
+                              }
+
+                              "setVpnPolicy" -> {
+                                  Core.prefs(ctx).edit().putString("vpn_policy", call.argument<String>("p") ?: "skip").apply()
+                                  Thread { Core.applyBlocking(ctx) }.start()
+                                  res.success(null)
+                              }
+
+                              "unblock" -> {
+                                  val pkg = call.argument<String>("pkg") ?: ""
+                                  Thread { Core.unblock(ctx, pkg) }.start()
+                                  res.success(null)
                               }
 
                               "export" -> bg(res) {
@@ -1139,6 +1390,10 @@ jobs:
               'atitle': '{app} reached its data limit', 'abody': 'Tap to open its data settings and restrict it.',
               'settings': 'Settings', 'bill': 'Billing cycle start day', 'billh': 'Used by the Month period and monthly limits.', 'export': 'Export usage (CSV)', 'exporth': 'Exports the selected period.', 'proj': 'Projected this cycle', 'fc': 'At this pace the limit is reached in {t}', 'fcok': 'On track to stay under the limit', 'ud': 'd', 'uh': 'h', 'used': 'Used', 'detail': 'App details', 'fg': 'Foreground', 'bg': 'Background', 'perday': 'Usage over time', 'wtitle': '{app} used {pct}% of its limit', 'wbody': '{used} of {limit} used. Tap to open its data settings.', 'ch_alerts': 'Limit alerts', 'ch_speed': 'Live speed', 'tile': 'Live speed', 'notif_off': 'Notifications are off — limit alerts won’t appear.', 'allow': 'Allow', 'phone_why': 'On Android 8–9, reading mobile data usage needs the Phone permission. Dataly never reads or makes calls.',
               'fasthint': 'Limits are checked about every 15 min. Turn on live speed to check every 30 s.', 'err': 'Couldn’t load data', 'retry': 'Retry', 'badnum': 'Enter a number greater than 0',
+              'block': 'Block internet when the limit is reached', 'blockh': 'Cuts this app’s connection until the period resets. Uses a local VPN; no data leaves your phone.', 'blocked': 'Blocked', 'unblock': 'Unblock for this period', 'vpnpol': 'If another VPN is already on', 'vpn_skip': 'Don’t block — keep my VPN connected', 'vpn_take': 'Block anyway — replace my VPN',
+              'vpnwhy': 'Android allows only one VPN at a time, so blocking and your own VPN can’t run together.', 'vpn_need': 'Blocking needs VPN permission. Tap Allow.',
+              'bk_title': '{app} is blocked', 'bk_body': 'Data limit reached. Its internet is cut until the period resets.', 'bkv_title': 'Couldn’t block {app}', 'bkv_body': 'Blocking needs Dataly’s VPN: another VPN may be active, or permission was withdrawn. Open Dataly to fix it.',
+              'pick': 'Pick date', 'nodata': 'No usage was recorded for this date. History starts from the day Dataly began recording.', 'total': 'Total',
             },
             'ar': {
               'perm': 'لقراءة استهلاك كل تطبيق يحتاج Dataly صلاحية "الوصول إلى بيانات الاستخدام".\nفعّله من الشاشة التالية ثم ارجع للتطبيق.',
@@ -1153,6 +1408,10 @@ jobs:
               'atitle': 'وصل {app} إلى حد الاستهلاك', 'abody': 'اضغط لفتح إعدادات بياناته وتقييده.',
               'settings': 'الإعدادات', 'bill': 'يوم بداية دورة الفاتورة', 'billh': 'تستخدمه فترة "شهر" والحدود الشهرية.', 'export': 'تصدير الاستهلاك (CSV)', 'exporth': 'يصدّر الفترة المحددة.', 'proj': 'المتوقع لهذه الدورة', 'fc': 'بهذا المعدل سيصل الحد خلال {t}', 'fcok': 'ضمن الحد بهذا المعدل', 'ud': 'يوم', 'uh': 'ساعة', 'used': 'المستهلك', 'detail': 'تفاصيل التطبيق', 'fg': 'أثناء الاستخدام', 'bg': 'في الخلفية', 'perday': 'الاستهلاك عبر الزمن', 'wtitle': '{app} استهلك {pct}% من حده', 'wbody': 'استُهلك {used} من {limit}. اضغط لفتح إعدادات البيانات.', 'ch_alerts': 'تنبيهات الحد', 'ch_speed': 'السرعة المباشرة', 'tile': 'السرعة المباشرة', 'notif_off': 'الإشعارات متوقفة — لن تظهر تنبيهات الحد.', 'allow': 'سماح', 'phone_why': 'في أندرويد 8–9 تتطلب قراءة بيانات الجوال صلاحية الهاتف. لا يقرأ Dataly المكالمات ولا يجريها.',
               'fasthint': 'تُفحص الحدود كل 15 دقيقة تقريباً. فعّل السرعة المباشرة للفحص كل 30 ثانية.', 'err': 'تعذّر تحميل البيانات', 'retry': 'إعادة المحاولة', 'badnum': 'أدخل رقماً أكبر من 0',
+              'block': 'قطع الإنترنت عند الوصول للحد', 'blockh': 'يقطع اتصال التطبيق حتى تبدأ الفترة التالية. يستخدم VPN محلياً ولا تخرج أي بيانات من هاتفك.', 'blocked': 'محظور', 'unblock': 'إلغاء الحظر لهذه الفترة', 'vpnpol': 'إذا كان VPN آخر يعمل', 'vpn_skip': 'لا تحظر — أبقِ VPN الخاص بي متصلاً', 'vpn_take': 'احظر على أي حال — استبدل VPN الخاص بي',
+              'vpnwhy': 'يسمح أندرويد بـ VPN واحد فقط في الوقت نفسه، لذلك لا يعمل الحظر وVPN الخاص بك معاً.', 'vpn_need': 'يحتاج الحظر إلى صلاحية VPN. اضغط سماح.',
+              'bk_title': 'تم حظر {app}', 'bk_body': 'وصل إلى حد الاستهلاك، وقُطع إنترنته حتى تبدأ الفترة التالية.', 'bkv_title': 'تعذّر حظر {app}', 'bkv_body': 'يحتاج الحظر إلى VPN الخاص بـ Dataly: قد يكون VPN آخر يعمل أو سُحبت الصلاحية. افتح Dataly لإصلاح ذلك.',
+              'pick': 'اختر تاريخاً', 'nodata': 'لا يوجد استهلاك مسجَّل لهذا التاريخ. يبدأ السجل من اليوم الذي بدأ فيه Dataly بالتسجيل.', 'total': 'الإجمالي',
             },
             'fr': {
               'perm': 'Pour lire la consommation de chaque appli, Dataly a besoin de l’accès aux données d’utilisation.\nActivez Dataly sur l’écran suivant puis revenez.',
@@ -1167,6 +1426,10 @@ jobs:
               'atitle': '{app} a atteint sa limite', 'abody': 'Touchez pour ouvrir ses paramètres de données et la restreindre.',
               'settings': 'Réglages', 'bill': 'Jour de début du cycle de facturation', 'billh': 'Utilisé par la période « Mois » et les limites mensuelles.', 'export': 'Exporter la conso (CSV)', 'exporth': 'Exporte la période sélectionnée.', 'proj': 'Prévision pour ce cycle', 'fc': 'À ce rythme, la limite sera atteinte dans {t}', 'fcok': 'Vous resterez sous la limite', 'ud': 'j', 'uh': 'h', 'used': 'Consommé', 'detail': 'Détails de l’appli', 'fg': 'Premier plan', 'bg': 'Arrière-plan', 'perday': 'Conso dans le temps', 'wtitle': '{app} a utilisé {pct} % de sa limite', 'wbody': '{used} sur {limit} utilisés. Touchez pour ouvrir ses paramètres de données.', 'ch_alerts': 'Alertes de limite', 'ch_speed': 'Vitesse en direct', 'tile': 'Vitesse en direct', 'notif_off': 'Notifications désactivées : les alertes n’apparaîtront pas.', 'allow': 'Autoriser', 'phone_why': 'Sur Android 8–9, lire la conso mobile nécessite l’autorisation Téléphone. Dataly ne lit ni ne passe jamais d’appels.',
               'fasthint': 'Les limites sont vérifiées toutes les ~15 min. Activez la vitesse en direct pour vérifier toutes les 30 s.', 'err': 'Impossible de charger les données', 'retry': 'Réessayer', 'badnum': 'Saisissez un nombre supérieur à 0',
+              'block': 'Couper Internet à l’atteinte de la limite', 'blockh': 'Coupe la connexion de l’appli jusqu’à la fin de la période. Utilise un VPN local ; aucune donnée ne quitte votre téléphone.', 'blocked': 'Bloquée', 'unblock': 'Débloquer pour cette période', 'vpnpol': 'Si un autre VPN est déjà actif', 'vpn_skip': 'Ne pas bloquer — garder mon VPN', 'vpn_take': 'Bloquer quand même — remplacer mon VPN',
+              'vpnwhy': 'Android n’autorise qu’un seul VPN à la fois : le blocage et votre VPN ne peuvent pas fonctionner ensemble.', 'vpn_need': 'Le blocage nécessite l’autorisation VPN. Touchez Autoriser.',
+              'bk_title': '{app} est bloquée', 'bk_body': 'Limite atteinte. Son accès Internet est coupé jusqu’à la fin de la période.', 'bkv_title': 'Impossible de bloquer {app}', 'bkv_body': 'Le blocage nécessite le VPN de Dataly : un autre VPN est peut-être actif ou l’autorisation a été retirée. Ouvrez Dataly pour corriger.',
+              'pick': 'Choisir une date', 'nodata': 'Aucune conso enregistrée pour cette date. L’historique commence le jour où Dataly a commencé à enregistrer.', 'total': 'Total',
             },
             'es': {
               'perm': 'Para leer el consumo de cada app, Dataly necesita “Acceso al uso”.\nActívalo en la siguiente pantalla y vuelve.',
@@ -1181,6 +1444,10 @@ jobs:
               'atitle': '{app} alcanzó su límite', 'abody': 'Toca para abrir sus ajustes de datos y restringirla.',
               'settings': 'Ajustes', 'bill': 'Día de inicio del ciclo de facturación', 'billh': 'Lo usan el periodo «Mes» y los límites mensuales.', 'export': 'Exportar consumo (CSV)', 'exporth': 'Exporta el periodo seleccionado.', 'proj': 'Previsto este ciclo', 'fc': 'A este ritmo se alcanzará el límite en {t}', 'fcok': 'No superarás el límite a este ritmo', 'ud': 'd', 'uh': 'h', 'used': 'Usado', 'detail': 'Detalles de la app', 'fg': 'Primer plano', 'bg': 'Segundo plano', 'perday': 'Consumo en el tiempo', 'wtitle': '{app} usó el {pct}% de su límite', 'wbody': '{used} de {limit} usados. Toca para abrir sus ajustes de datos.', 'ch_alerts': 'Alertas de límite', 'ch_speed': 'Velocidad en vivo', 'tile': 'Velocidad en vivo', 'notif_off': 'Notificaciones desactivadas: no verás las alertas de límite.', 'allow': 'Permitir', 'phone_why': 'En Android 8–9, leer el consumo de datos móviles requiere el permiso de Teléfono. Dataly nunca lee ni hace llamadas.',
               'fasthint': 'Los límites se revisan cada ~15 min. Activa la velocidad en vivo para revisarlos cada 30 s.', 'err': 'No se pudieron cargar los datos', 'retry': 'Reintentar', 'badnum': 'Introduce un número mayor que 0',
+              'block': 'Cortar Internet al alcanzar el límite', 'blockh': 'Corta la conexión de la app hasta que termine el periodo. Usa una VPN local; ningún dato sale del teléfono.', 'blocked': 'Bloqueada', 'unblock': 'Desbloquear en este periodo', 'vpnpol': 'Si ya hay otra VPN activa', 'vpn_skip': 'No bloquear — mantener mi VPN', 'vpn_take': 'Bloquear igualmente — reemplazar mi VPN',
+              'vpnwhy': 'Android solo permite una VPN a la vez, así que el bloqueo y tu VPN no pueden funcionar juntos.', 'vpn_need': 'El bloqueo necesita permiso de VPN. Toca Permitir.',
+              'bk_title': '{app} está bloqueada', 'bk_body': 'Límite alcanzado. Su Internet queda cortado hasta que termine el periodo.', 'bkv_title': 'No se pudo bloquear {app}', 'bkv_body': 'El bloqueo necesita la VPN de Dataly: puede haber otra VPN activa o se retiró el permiso. Abre Dataly para solucionarlo.',
+              'pick': 'Elegir fecha', 'nodata': 'No hay consumo registrado en esta fecha. El historial empieza el día en que Dataly comenzó a registrar.', 'total': 'Total',
             },
             'tr': {
               'perm': 'Her uygulamanın kullanımını okumak için Dataly’nin “Kullanım erişimi” iznine ihtiyacı var.\nBir sonraki ekranda etkinleştirip geri dönün.',
@@ -1195,6 +1462,10 @@ jobs:
               'atitle': '{app} limitine ulaştı', 'abody': 'Veri ayarlarını açıp kısıtlamak için dokunun.',
               'settings': 'Ayarlar', 'bill': 'Fatura dönemi başlangıç günü', 'billh': '“Ay” dönemi ve aylık limitler tarafından kullanılır.', 'export': 'Kullanımı dışa aktar (CSV)', 'exporth': 'Seçili dönemi dışa aktarır.', 'proj': 'Bu dönem için tahmin', 'fc': 'Bu hızla limite {t} içinde ulaşılır', 'fcok': 'Limitin altında kalacaksınız', 'ud': 'g', 'uh': 'sa', 'used': 'Kullanılan', 'detail': 'Uygulama ayrıntıları', 'fg': 'Ön plan', 'bg': 'Arka plan', 'perday': 'Zamana göre kullanım', 'wtitle': '{app} limitinin %{pct} kadarını kullandı', 'wbody': '{limit} limitin {used} kadarı kullanıldı. Veri ayarlarını açmak için dokunun.', 'ch_alerts': 'Limit uyarıları', 'ch_speed': 'Canlı hız', 'tile': 'Canlı hız', 'notif_off': 'Bildirimler kapalı — limit uyarıları görünmez.', 'allow': 'İzin ver', 'phone_why': 'Android 8–9’da mobil veri kullanımını okumak için Telefon izni gerekir. Dataly aramaları asla okumaz veya yapmaz.',
               'fasthint': 'Limitler yaklaşık 15 dakikada bir kontrol edilir. 30 sn’de bir kontrol için canlı hızı açın.', 'err': 'Veriler yüklenemedi', 'retry': 'Tekrar dene', 'badnum': '0’dan büyük bir sayı girin',
+              'block': 'Limite ulaşınca interneti kes', 'blockh': 'Dönem sıfırlanana kadar uygulamanın bağlantısını keser. Yerel VPN kullanır; veriler telefonunuzdan çıkmaz.', 'blocked': 'Engellendi', 'unblock': 'Bu dönem için engeli kaldır', 'vpnpol': 'Başka bir VPN zaten açıksa', 'vpn_skip': 'Engelleme — VPN’im bağlı kalsın', 'vpn_take': 'Yine de engelle — VPN’imin yerine geç',
+              'vpnwhy': 'Android aynı anda yalnızca bir VPN’e izin verir; bu yüzden engelleme ve kendi VPN’iniz birlikte çalışamaz.', 'vpn_need': 'Engelleme için VPN izni gerekir. İzin ver’e dokunun.',
+              'bk_title': '{app} engellendi', 'bk_body': 'Limite ulaşıldı. Dönem sıfırlanana kadar interneti kesildi.', 'bkv_title': '{app} engellenemedi', 'bkv_body': 'Engelleme Dataly’nin VPN’ini gerektirir: başka bir VPN açık olabilir veya izin geri alınmış olabilir. Düzeltmek için Dataly’yi açın.',
+              'pick': 'Tarih seç', 'nodata': 'Bu tarih için kayıtlı kullanım yok. Geçmiş, Dataly’nin kayda başladığı günden itibaren tutulur.', 'total': 'Toplam',
             },
             'de': {
               'perm': 'Um den Verbrauch jeder App zu lesen, braucht Dataly den „Nutzungszugriff“.\nAktiviere Dataly im nächsten Bildschirm und kehre zurück.',
@@ -1209,6 +1480,10 @@ jobs:
               'atitle': '{app} hat sein Limit erreicht', 'abody': 'Tippe, um die Dateneinstellungen zu öffnen und einzuschränken.',
               'settings': 'Einstellungen', 'bill': 'Starttag des Abrechnungszeitraums', 'billh': 'Wird für den Zeitraum „Monat“ und Monatslimits verwendet.', 'export': 'Verbrauch exportieren (CSV)', 'exporth': 'Exportiert den gewählten Zeitraum.', 'proj': 'Prognose für diesen Zeitraum', 'fc': 'In diesem Tempo wird das Limit in {t} erreicht', 'fcok': 'Das Limit wird voraussichtlich nicht erreicht', 'ud': 'T', 'uh': 'Std', 'used': 'Verbraucht', 'detail': 'App-Details', 'fg': 'Vordergrund', 'bg': 'Hintergrund', 'perday': 'Verbrauch im Zeitverlauf', 'wtitle': '{app} hat {pct} % seines Limits verbraucht', 'wbody': '{used} von {limit} verbraucht. Tippe, um die Dateneinstellungen zu öffnen.', 'ch_alerts': 'Limit-Warnungen', 'ch_speed': 'Live-Geschwindigkeit', 'tile': 'Live-Geschwindigkeit', 'notif_off': 'Benachrichtigungen sind aus – Limit-Warnungen erscheinen nicht.', 'allow': 'Erlauben', 'phone_why': 'Unter Android 8–9 erfordert das Lesen der mobilen Daten die Telefon-Berechtigung. Dataly liest oder führt nie Anrufe aus.',
               'fasthint': 'Limits werden etwa alle 15 Min. geprüft. Aktiviere die Live-Geschwindigkeit für eine Prüfung alle 30 s.', 'err': 'Daten konnten nicht geladen werden', 'retry': 'Erneut versuchen', 'badnum': 'Gib eine Zahl größer als 0 ein',
+              'block': 'Internet bei Erreichen des Limits sperren', 'blockh': 'Trennt die App bis zum Ende des Zeitraums vom Netz. Nutzt ein lokales VPN; keine Daten verlassen dein Gerät.', 'blocked': 'Gesperrt', 'unblock': 'Für diesen Zeitraum entsperren', 'vpnpol': 'Wenn bereits ein anderes VPN aktiv ist', 'vpn_skip': 'Nicht sperren — mein VPN behalten', 'vpn_take': 'Trotzdem sperren — mein VPN ersetzen',
+              'vpnwhy': 'Android erlaubt nur ein VPN gleichzeitig, daher können Sperre und dein eigenes VPN nicht zusammen laufen.', 'vpn_need': 'Die Sperre braucht die VPN-Berechtigung. Tippe auf Erlauben.',
+              'bk_title': '{app} ist gesperrt', 'bk_body': 'Limit erreicht. Das Internet ist bis zum Ende des Zeitraums gesperrt.', 'bkv_title': '{app} konnte nicht gesperrt werden', 'bkv_body': 'Die Sperre braucht das VPN von Dataly: Ein anderes VPN ist aktiv oder die Berechtigung fehlt. Öffne Dataly, um es zu beheben.',
+              'pick': 'Datum wählen', 'nodata': 'Für dieses Datum wurde kein Verbrauch erfasst. Der Verlauf beginnt an dem Tag, an dem Dataly mit der Aufzeichnung begann.', 'total': 'Gesamt',
             },
             'ru': {
               'perm': 'Чтобы читать расход каждого приложения, Dataly нужен «Доступ к данным об использовании».\nВключите Dataly на следующем экране и вернитесь.',
@@ -1223,6 +1498,10 @@ jobs:
               'atitle': '{app} достиг лимита', 'abody': 'Нажмите, чтобы открыть настройки данных и ограничить.',
               'settings': 'Настройки', 'bill': 'День начала расчётного периода', 'billh': 'Используется для периода «Месяц» и месячных лимитов.', 'export': 'Экспорт расхода (CSV)', 'exporth': 'Экспортирует выбранный период.', 'proj': 'Прогноз на этот период', 'fc': 'С такой скоростью лимит будет достигнут через {t}', 'fcok': 'Лимит не будет превышен', 'ud': 'д', 'uh': 'ч', 'used': 'Использовано', 'detail': 'Сведения о приложении', 'fg': 'Активный режим', 'bg': 'Фон', 'perday': 'Расход по времени', 'wtitle': '{app} использовал {pct}% лимита', 'wbody': 'Использовано {used} из {limit}. Нажмите, чтобы открыть настройки данных.', 'ch_alerts': 'Оповещения о лимите', 'ch_speed': 'Скорость в реальном времени', 'tile': 'Скорость в реальном времени', 'notif_off': 'Уведомления выключены — оповещения о лимите не появятся.', 'allow': 'Разрешить', 'phone_why': 'На Android 8–9 для чтения мобильного трафика нужно разрешение «Телефон». Dataly никогда не читает и не совершает звонки.',
               'fasthint': 'Лимиты проверяются примерно раз в 15 мин. Включите скорость в уведомлении для проверки каждые 30 с.', 'err': 'Не удалось загрузить данные', 'retry': 'Повторить', 'badnum': 'Введите число больше 0',
+              'block': 'Отключать интернет при достижении лимита', 'blockh': 'Отключает приложение от сети до конца периода. Используется локальный VPN; данные не покидают телефон.', 'blocked': 'Заблокировано', 'unblock': 'Разблокировать на этот период', 'vpnpol': 'Если уже включён другой VPN', 'vpn_skip': 'Не блокировать — оставить мой VPN', 'vpn_take': 'Всё равно блокировать — заменить мой VPN',
+              'vpnwhy': 'Android допускает только один VPN одновременно, поэтому блокировка и ваш VPN не работают вместе.', 'vpn_need': 'Для блокировки нужно разрешение VPN. Нажмите «Разрешить».',
+              'bk_title': '{app} заблокировано', 'bk_body': 'Лимит достигнут. Интернет отключён до конца периода.', 'bkv_title': 'Не удалось заблокировать {app}', 'bkv_body': 'Для блокировки нужен VPN Dataly: возможно, включён другой VPN или разрешение отозвано. Откройте Dataly, чтобы исправить.',
+              'pick': 'Выбрать дату', 'nodata': 'За эту дату расход не записан. История ведётся с того дня, когда Dataly начал запись.', 'total': 'Итого',
             },
             'id': {
               'perm': 'Untuk membaca pemakaian tiap aplikasi, Dataly memerlukan “Akses penggunaan”.\nAktifkan Dataly di layar berikutnya lalu kembali.',
@@ -1237,12 +1516,17 @@ jobs:
               'atitle': '{app} mencapai batasnya', 'abody': 'Ketuk untuk membuka pengaturan datanya dan membatasi.',
               'settings': 'Pengaturan', 'bill': 'Hari mulai siklus tagihan', 'billh': 'Dipakai oleh periode “Bulan” dan batas bulanan.', 'export': 'Ekspor pemakaian (CSV)', 'exporth': 'Mengekspor periode yang dipilih.', 'proj': 'Perkiraan siklus ini', 'fc': 'Dengan laju ini batas tercapai dalam {t}', 'fcok': 'Diperkirakan tetap di bawah batas', 'ud': 'hr', 'uh': 'j', 'used': 'Terpakai', 'detail': 'Detail aplikasi', 'fg': 'Latar depan', 'bg': 'Latar belakang', 'perday': 'Pemakaian dari waktu ke waktu', 'wtitle': '{app} memakai {pct}% batasnya', 'wbody': '{used} dari {limit} terpakai. Ketuk untuk membuka pengaturan datanya.', 'ch_alerts': 'Peringatan batas', 'ch_speed': 'Kecepatan langsung', 'tile': 'Kecepatan langsung', 'notif_off': 'Notifikasi mati — peringatan batas tidak akan muncul.', 'allow': 'Izinkan', 'phone_why': 'Di Android 8–9, membaca data seluler memerlukan izin Telepon. Dataly tidak pernah membaca atau melakukan panggilan.',
               'fasthint': 'Batas diperiksa sekitar tiap 15 menit. Aktifkan kecepatan langsung untuk pemeriksaan tiap 30 dtk.', 'err': 'Gagal memuat data', 'retry': 'Coba lagi', 'badnum': 'Masukkan angka lebih dari 0',
+              'block': 'Putus internet saat batas tercapai', 'blockh': 'Memutus koneksi aplikasi hingga periode berakhir. Memakai VPN lokal; tidak ada data yang keluar dari ponsel.', 'blocked': 'Diblokir', 'unblock': 'Buka blokir untuk periode ini', 'vpnpol': 'Jika VPN lain sudah aktif', 'vpn_skip': 'Jangan blokir — pertahankan VPN saya', 'vpn_take': 'Tetap blokir — ganti VPN saya',
+              'vpnwhy': 'Android hanya mengizinkan satu VPN dalam satu waktu, jadi pemblokiran dan VPN Anda tidak bisa berjalan bersamaan.', 'vpn_need': 'Pemblokiran memerlukan izin VPN. Ketuk Izinkan.',
+              'bk_title': '{app} diblokir', 'bk_body': 'Batas tercapai. Internetnya diputus hingga periode berakhir.', 'bkv_title': 'Tidak bisa memblokir {app}', 'bkv_body': 'Pemblokiran memerlukan VPN Dataly: mungkin VPN lain aktif atau izin dicabut. Buka Dataly untuk memperbaikinya.',
+              'pick': 'Pilih tanggal', 'nodata': 'Tidak ada pemakaian tercatat pada tanggal ini. Riwayat dimulai sejak hari Dataly mulai mencatat.', 'total': 'Total',
             },
           };
 
           /// Keys pushed to the native side (notifications, widget, Quick Settings tile).
           const nativeKeys = [
             'atitle', 'abody', 'wtitle', 'wbody', 'ch_alerts', 'ch_speed', 'tile', 'today', 'month', 'wifi', 'mobile',
+            'bk_title', 'bk_body', 'bkv_title', 'bkv_body',
           ];
 
           String tr(String lang, String k, [Map<String, String>? args]) {
@@ -1284,11 +1568,13 @@ jobs:
 
           class LimitStatus {
             final num used, start, end;
-            const LimitStatus(this.used, this.start, this.end);
+            final bool blocked;
+            const LimitStatus(this.used, this.start, this.end, [this.blocked = false]);
             factory LimitStatus.fromMap(Map m) => LimitStatus(
                   (m['used'] as num?) ?? 0,
                   (m['start'] as num?) ?? 0,
                   (m['end'] as num?) ?? 0,
+                  m['blocked'] == true,
                 );
           }
 
@@ -1311,12 +1597,13 @@ jobs:
 
           // ---------------------------------------------------------------- periods
 
-          const periodKeys = ['today', 'week', 'month', 'm3', 'year'];
+          const periodKeys = ['today', 'week', 'month', 'm3', 'year', 'pick'];
 
           /// A day-aligned time range in epoch milliseconds, split into [n] chart buckets.
           class Range {
             final int s, e, n;
-            const Range(this.s, this.e, this.n);
+            final bool hourly; // single day shown as 24 hourly bars
+            const Range(this.s, this.e, this.n, [this.hourly = false]);
           }
 
           /// Start of the billing cycle that contains [now]. [day] is 1..28.
@@ -1324,13 +1611,13 @@ jobs:
               DateTime(now.year, now.day < day ? now.month - 1 : now.month, day);
 
           /// Period index: 0 today, 1 week (7 days), 2 current billing cycle, 3 = 90 days, 4 = 365 days.
-          Range rangeFor(int pi, int billing) {
+          Range rangeFor(int pi, int billing, [DateTimeRange? custom]) {
             final now = DateTime.now();
             int ms(DateTime d) => d.millisecondsSinceEpoch;
             final tomorrow = ms(DateTime(now.year, now.month, now.day + 1));
             switch (pi) {
               case 0:
-                return Range(ms(DateTime(now.year, now.month, now.day)), tomorrow, 24);
+                return Range(ms(DateTime(now.year, now.month, now.day)), tomorrow, 24, true);
               case 1:
                 return Range(ms(DateTime(now.year, now.month, now.day - 6)), tomorrow, 7);
               case 2:
@@ -1342,9 +1629,26 @@ jobs:
                 }
               case 3:
                 return Range(ms(DateTime(now.year, now.month, now.day - 89)), tomorrow, 13);
-              default:
+              case 4:
                 return Range(ms(DateTime(now.year, now.month, now.day - 364)), tomorrow, 12);
+              default:
+                {
+                  // 5 = a day (or range of days) picked by the user
+                  final c = custom ??
+                      DateTimeRange(start: DateTime(now.year, now.month, now.day), end: DateTime(now.year, now.month, now.day));
+                  final a = DateTime(c.start.year, c.start.month, c.start.day);
+                  final b = DateTime(c.end.year, c.end.month, c.end.day + 1);
+                  final days = ((ms(b) - ms(a)) / 86400000).round();
+                  return Range(ms(a), ms(b), days <= 1 ? 24 : (days <= 45 ? days : 15), days <= 1);
+                }
             }
+          }
+
+          /// "11 May 2025" or "11 May 2025 – 20 May 2025", localized.
+          String rangeLabel(BuildContext c, DateTimeRange r) {
+            final l = MaterialLocalizations.of(c);
+            final a = l.formatMediumDate(r.start);
+            return DateUtils.isSameDay(r.start, r.end) ? a : '$a – ${l.formatMediumDate(r.end)}';
           }
 
           /// Linear projection of [used] to the end of range [r]; null while there is too little data.
@@ -1386,6 +1690,11 @@ jobs:
               final l = await _ch.invokeMethod<List>('apps') ?? const [];
               return l.map((x) => Map<String, dynamic>.from(x as Map)).toList();
             }
+
+            static Future<Map<String, dynamic>> vpnState() async => _m(await _ch.invokeMethod('vpnState'));
+            static Future<bool> prepareVpn() async => (await _ch.invokeMethod<bool>('prepareVpn')) ?? false;
+            static Future<void> setVpnPolicy(String p) async => _ch.invokeMethod('setVpnPolicy', {'p': p});
+            static Future<void> unblock(String pkg) async => _ch.invokeMethod('unblock', {'pkg': pkg});
 
             static Future<Map<String, dynamic>> limitStatus() async => _m(await _ch.invokeMethod('limitStatus'));
 
@@ -1544,6 +1853,10 @@ jobs:
             int sdk = 0, billing = 1;
             int pi = 1, net = 0;
             bool speed = false, loading = false, notifOk = true, needPhone = false;
+            bool vpnGranted = true, otherVpn = false;
+            String vpnPolicy = 'skip';
+            DateTimeRange? custom; // range chosen with the date picker
+            DateTime? histStart; // first day stored in the local history
             String? error;
 
             num wifiTotal = 0, mobTotal = 0;
@@ -1566,6 +1879,9 @@ jobs:
                 lang = (st['lang'] as String?) ?? '';
                 sdk = (st['sdk'] as num?)?.toInt() ?? 0;
                 billing = (st['bill'] as num?)?.toInt() ?? 1;
+                vpnPolicy = (st['vpn_policy'] as String?) ?? 'skip';
+                final hs = (st['hist_start'] as num?)?.toInt() ?? 0;
+                histStart = hs > 0 ? DateTime.fromMillisecondsSinceEpoch(hs) : null;
                 ready = true;
                 access = await Native.hasAccess();
               } catch (_) {
@@ -1580,6 +1896,7 @@ jobs:
               await _checkPerms();
               unawaited(load());
               unawaited(loadStatus());
+              unawaited(refreshVpn());
               if (allApps.isEmpty) {
                 try {
                   allApps = (await Native.apps()).map((m) => AppInfo(m['pkg'] as String, m['name'] as String)).toList();
@@ -1662,11 +1979,54 @@ jobs:
                 notifOk = r.isGranted;
                 notifyListeners();
               }
+              // blocking is evaluated natively right after saving; refresh the badges a moment later
+              unawaited(Future.delayed(const Duration(seconds: 2)).then((_) {
+                loadStatus();
+                refreshVpn();
+              }));
+            }
+
+            // ------------------------------------------------------------ blocking (local VPN)
+            bool get blockEnabled => limits.values.any((l) => l is Map && l['block'] == true);
+
+            Future<void> refreshVpn() async {
+              try {
+                final m = await Native.vpnState();
+                vpnGranted = m['granted'] == true;
+                otherVpn = m['other'] == true;
+                notifyListeners();
+              } catch (_) {}
+            }
+
+            /// Shows Android's VPN consent dialog if needed.
+            Future<void> ensureVpn() async {
+              try {
+                vpnGranted = await Native.prepareVpn();
+              } catch (_) {}
+              notifyListeners();
+              await refreshVpn();
               unawaited(loadStatus());
             }
 
+            Future<void> setVpnPolicy(String p) async {
+              vpnPolicy = p;
+              notifyListeners();
+              try {
+                await Native.setVpnPolicy(p);
+              } catch (_) {}
+              await refreshVpn();
+            }
+
+            Future<void> unblock(String pkg) async {
+              try {
+                await Native.unblock(pkg);
+              } catch (_) {}
+              await Future.delayed(const Duration(milliseconds: 500));
+              await loadStatus();
+            }
+
             Future<void> exportCsv() async {
-              final r = rangeFor(pi, billing);
+              final r = rangeFor(pi, billing, custom);
               try {
                 await Native.exportCsv(r.s, r.e);
               } catch (_) {}
@@ -1675,6 +2035,12 @@ jobs:
             // ------------------------------------------------------------ data
             void setPeriod(int i) {
               pi = i;
+              load();
+            }
+
+            void setCustom(DateTimeRange r) {
+              custom = r;
+              pi = 5;
               load();
             }
 
@@ -1689,8 +2055,8 @@ jobs:
               error = null;
               notifyListeners();
               try {
-                final r = rangeFor(pi, billing);
-                final m = await Native.load(r.s, r.e, r.n, pi == 0);
+                final r = rangeFor(pi, billing, custom);
+                final m = await Native.load(r.s, r.e, r.n, r.hourly);
                 if (id != _req) return; // a newer request replaced this one
                 wifiTotal = (m['wifi'] as num?) ?? 0;
                 mobTotal = (m['mobile'] as num?) ?? 0;
@@ -1782,6 +2148,15 @@ jobs:
                       action: s.t('allow'),
                       onAction: s.allowNotifications,
                     ),
+                  if (s.blockEnabled && !s.vpnGranted)
+                    InfoBanner(
+                      icon: Icons.vpn_key_rounded,
+                      text: s.t('vpn_need'),
+                      action: s.t('allow'),
+                      onAction: s.ensureVpn,
+                    ),
+                  if (s.blockEnabled && s.otherVpn && s.vpnPolicy == 'skip')
+                    InfoBanner(icon: Icons.vpn_lock_rounded, text: s.t('vpnwhy'), color: kWifi),
                   if (s.limits.isNotEmpty && !s.speed)
                     InfoBanner(icon: Icons.info_outline_rounded, text: s.t('fasthint'), color: kWifi),
                   TextField(
@@ -1819,7 +2194,20 @@ jobs:
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      Row(children: [
+                                        Expanded(child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                        if (st?.blocked == true)
+                                          Container(
+                                            margin: const EdgeInsetsDirectional.only(start: 8),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.redAccent.withValues(alpha: .18),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Text(s.t('blocked'),
+                                                style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w700)),
+                                          ),
+                                      ]),
                                       if (lim != null) ...[
                                         const SizedBox(height: 4),
                                         Text(
@@ -1883,6 +2271,7 @@ jobs:
           class _LimitSheetState extends State<LimitSheet> {
             late final TextEditingController ctl;
             late String net, per;
+            late bool block;
             bool bad = false;
             AppState get s => widget.s;
             Map? get old => s.limits[widget.pkg] as Map?;
@@ -1894,6 +2283,7 @@ jobs:
               ctl = TextEditingController(text: o == null ? '100' : _mbText(o['bytes'] as num));
               net = (o?['net'] as String?) ?? 'mobile';
               per = (o?['period'] as String?) ?? 'month';
+              block = (o?['block'] as bool?) ?? false;
             }
 
             @override
@@ -1908,9 +2298,14 @@ jobs:
                 setState(() => bad = true);
                 return;
               }
-              s.limits[widget.pkg] = {'bytes': (mb * 1048576).round(), 'net': net, 'period': per};
+              s.limits[widget.pkg] = {'bytes': (mb * 1048576).round(), 'net': net, 'period': per, 'block': block};
+              final wantsBlock = block;
               Navigator.pop(context);
-              s.saveLimits();
+              s.saveLimits().then((_) async {
+                if (!wantsBlock) return;
+                await s.refreshVpn();
+                if (!s.vpnGranted) await s.ensureVpn();
+              });
             }
 
             @override
@@ -1962,7 +2357,25 @@ jobs:
                             onSelectionChanged: (v) => setState(() => per = v.first),
                           ),
                         ),
-                        const SizedBox(height: 14),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: block,
+                          onChanged: (v) => setState(() => block = v),
+                          title: Text(s.t('block'), style: const TextStyle(fontSize: 14)),
+                          subtitle: Text(s.t('blockh'), style: const TextStyle(fontSize: 12)),
+                        ),
+                        if (s.status[widget.pkg]?.blocked == true)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: FilledButton.tonal(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                s.unblock(widget.pkg);
+                              },
+                              child: Text(s.t('unblock')),
+                            ),
+                          ),
+                        const SizedBox(height: 6),
                         OutlinedButton.icon(
                           onPressed: () => Native.openAppData(widget.pkg),
                           icon: const Icon(Icons.open_in_new_rounded, size: 18),
@@ -2003,6 +2416,25 @@ jobs:
                   : a.uid == -5
                       ? s.t('teth')
                       : s.t('sys');
+            }
+
+            /// Date-range picker limited to the days that exist in the local history.
+            Future<void> _pick(BuildContext context) async {
+              final now = DateTime.now();
+              final today = DateTime(now.year, now.month, now.day);
+              var first = s.histStart ?? today.subtract(const Duration(days: 89));
+              first = DateTime(first.year, first.month, first.day);
+              if (first.isAfter(today)) first = today;
+              var init = s.custom ?? DateTimeRange(start: today, end: today);
+              if (init.start.isBefore(first) || init.end.isAfter(today)) init = DateTimeRange(start: today, end: today);
+              final r = await showDateRangePicker(
+                context: context,
+                firstDate: first,
+                lastDate: today,
+                initialDateRange: init,
+                helpText: s.t('pick'),
+              );
+              if (r != null) s.setCustom(r);
             }
 
             @override
@@ -2071,9 +2503,12 @@ jobs:
                           Padding(
                             padding: const EdgeInsetsDirectional.only(end: 8),
                             child: ChoiceChip(
-                              label: Text(s.t(periodKeys[i])),
+                              avatar: i == 5 ? const Icon(Icons.calendar_month_rounded, size: 18) : null,
+                              label: Text(i == 5 && s.pi == 5 && s.custom != null
+                                  ? rangeLabel(context, s.custom!)
+                                  : s.t(periodKeys[i])),
                               selected: s.pi == i,
-                              onSelected: (_) => s.setPeriod(i),
+                              onSelected: (_) => i == 5 ? _pick(context) : s.setPeriod(i),
                             ),
                           ),
                       ]),
@@ -2089,6 +2524,9 @@ jobs:
                       padding: const EdgeInsets.all(16),
                       decoration: cardBox(),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${s.t('total')}: ${fmt(s.wifiTotal + s.mobTotal)}',
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 12),
                         BarChart(values: series, color: col),
                         if (proj != null) ...[
                           const SizedBox(height: 12),
@@ -2141,7 +2579,16 @@ jobs:
                         ),
                       ),
                     if (list.isEmpty && !s.loading)
-                      const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('—'))),
+                      Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: Text(
+                            s.pi == 5 ? s.t('nodata') : '—',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white54, height: 1.5),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               );
@@ -2180,8 +2627,8 @@ jobs:
                 err = null;
               });
               try {
-                final r = rangeFor(wanted, s.billing);
-                final m = await Native.detail(widget.pkg, r.s, r.e, r.n);
+                final r = rangeFor(wanted, s.billing, s.custom);
+                final m = await Native.detail(widget.pkg, r.s, r.e, r.hourly ? 1 : r.n);
                 if (!mounted || wanted != idx) return;
                 setState(() => d = AppDetail.fromMap(m));
               } catch (e) {
@@ -2216,7 +2663,7 @@ jobs:
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(children: [
-                      for (var i = 1; i < periodKeys.length; i++)
+                      for (var i = 1; i < 5; i++)
                         Padding(
                           padding: const EdgeInsetsDirectional.only(end: 8),
                           child: ChoiceChip(
@@ -2230,6 +2677,11 @@ jobs:
                         ),
                     ]),
                   ),
+                  if (idx == 5 && s.custom != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(rangeLabel(context, s.custom!), style: const TextStyle(color: kCyan, fontWeight: FontWeight.w700)),
+                    ),
                   const SizedBox(height: 14),
                   if (err != null)
                     InfoBanner(
@@ -2474,6 +2926,19 @@ jobs:
                           },
                         ),
                       ),
+                      ListTile(
+                        leading: const Icon(Icons.vpn_lock_rounded),
+                        title: Text(s.t('vpnpol')),
+                        subtitle: Text(s.t('vpnwhy'), style: const TextStyle(fontSize: 12)),
+                      ),
+                      for (final p in const ['skip', 'take'])
+                        ListTile(
+                          dense: true,
+                          contentPadding: const EdgeInsetsDirectional.only(start: 72, end: 16),
+                          title: Text(s.t(p == 'skip' ? 'vpn_skip' : 'vpn_take')),
+                          trailing: s.vpnPolicy == p ? const Icon(Icons.check_rounded, color: kMob) : null,
+                          onTap: () => s.setVpnPolicy(p),
+                        ),
                       ListTile(
                         leading: const Icon(Icons.ios_share_rounded),
                         title: Text(s.t('export')),
