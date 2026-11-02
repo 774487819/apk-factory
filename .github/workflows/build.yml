@@ -2546,11 +2546,21 @@ jobs:
           }
           EOF
 
+      - name: Install Android SDK Platform 37 (optional, Gradle also auto-downloads it)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-37.0" || "$SDKM" "platforms;android-37" || echo "Platform 37 will be fetched by Gradle"
+
       - name: Build release APK
         working-directory: app_build
         run: |
-          # Notification channels / foreground service need API 26+
+          # permission_handler 13 needs compileSdk 37; the Flutter template uses 36.
+          # Notification channels / foreground service need minSdk 26.
           sed -i 's/flutter\.minSdkVersion/26/' android/app/build.gradle*
+          sed -i 's/flutter\.compileSdkVersion/37/' android/app/build.gradle*
+          echo "android.suppressUnsupportedCompileSdk=37" >> android/gradle.properties
+          grep -n "compileSdk\|minSdk" android/app/build.gradle*
           flutter pub get
           flutter build apk --release
 
