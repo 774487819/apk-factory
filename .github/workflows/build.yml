@@ -1,38 +1,2561 @@
-name: Build APK
+name: Build Dataly APK
+
 on:
   push:
+    branches: [ main, master ]
   workflow_dispatch:
-permissions:
-  contents: write
+
 jobs:
-  build:
+  build_apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          gradle-version: '8.7'
-      - name: Create project
+          channel: 'stable'
+
+      - name: Create Flutter Project & Install Packages
         run: |
-          set -e
-          mkdir app_build && cd app_build
-          w(){ mkdir -p "$(dirname "$1")"; base64 -d > "$1"; }
-          echo cGx1Z2luTWFuYWdlbWVudCB7IHJlcG9zaXRvcmllcyB7IGdvb2dsZSgpOyBtYXZlbkNlbnRyYWwoKTsgZ3JhZGxlUGx1Z2luUG9ydGFsKCkgfSB9CmRlcGVuZGVuY3lSZXNvbHV0aW9uTWFuYWdlbWVudCB7IHJlcG9zaXRvcmllcyB7IGdvb2dsZSgpOyBtYXZlbkNlbnRyYWwoKSB9IH0Kcm9vdFByb2plY3QubmFtZSA9ICJBcHAiCmluY2x1ZGUgJzphcHAnCg== | w 'settings.gradle'
-          echo cGx1Z2lucyB7IGlkICdjb20uYW5kcm9pZC5hcHBsaWNhdGlvbicgdmVyc2lvbiAnOC41LjInIGFwcGx5IGZhbHNlIH0K | w 'build.gradle'
-          echo b3JnLmdyYWRsZS5qdm1hcmdzPS1YbXgyMDQ4bQphbmRyb2lkLnVzZUFuZHJvaWRYPXRydWUK | w 'gradle.properties'
-          echo cGx1Z2lucyB7IGlkICdjb20uYW5kcm9pZC5hcHBsaWNhdGlvbicgfQphbmRyb2lkIHsKICBuYW1lc3BhY2UgJ2NvbS5hcGtmYWN0b3J5LmFwcCcKICBjb21waWxlU2RrIDM0CiAgZGVmYXVsdENvbmZpZyB7IGFwcGxpY2F0aW9uSWQgJ2NvbS5hcGtmYWN0b3J5LmFwcCc7IG1pblNkayAyNDsgdGFyZ2V0U2RrIDM0OyB2ZXJzaW9uQ29kZSAxOyB2ZXJzaW9uTmFtZSAnMS4wJyB9CiAgY29tcGlsZU9wdGlvbnMgeyBzb3VyY2VDb21wYXRpYmlsaXR5IEphdmFWZXJzaW9uLlZFUlNJT05fMTc7IHRhcmdldENvbXBhdGliaWxpdHkgSmF2YVZlcnNpb24uVkVSU0lPTl8xNyB9Cn0K | w 'app/build.gradle'
-          echo PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPG1hbmlmZXN0IHhtbG5zOmFuZHJvaWQ9Imh0dHA6Ly9zY2hlbWFzLmFuZHJvaWQuY29tL2Fway9yZXMvYW5kcm9pZCI+CiAgPHVzZXMtcGVybWlzc2lvbiBhbmRyb2lkOm5hbWU9ImFuZHJvaWQucGVybWlzc2lvbi5JTlRFUk5FVCIvPgogIDxhcHBsaWNhdGlvbiBhbmRyb2lkOmxhYmVsPSJAc3RyaW5nL2FwcF9uYW1lIiBhbmRyb2lkOmljb249IkBhbmRyb2lkOmRyYXdhYmxlL3N5bV9kZWZfYXBwX2ljb24iIGFuZHJvaWQ6c3VwcG9ydHNSdGw9InRydWUiPgogICAgPGFjdGl2aXR5IGFuZHJvaWQ6bmFtZT0iLk1haW5BY3Rpdml0eSIgYW5kcm9pZDpleHBvcnRlZD0idHJ1ZSI+CiAgICAgIDxpbnRlbnQtZmlsdGVyPjxhY3Rpb24gYW5kcm9pZDpuYW1lPSJhbmRyb2lkLmludGVudC5hY3Rpb24uTUFJTiIvPjxjYXRlZ29yeSBhbmRyb2lkOm5hbWU9ImFuZHJvaWQuaW50ZW50LmNhdGVnb3J5LkxBVU5DSEVSIi8+PC9pbnRlbnQtZmlsdGVyPgogICAgPC9hY3Rpdml0eT4KICA8L2FwcGxpY2F0aW9uPgo8L21hbmlmZXN0Pgo= | w 'app/src/main/AndroidManifest.xml'
-          echo PHJlc291cmNlcz48c3RyaW5nIG5hbWU9ImFwcF9uYW1lIj7Zhdi12YbYuSBBUEs8L3N0cmluZz48L3Jlc291cmNlcz4K | w 'app/src/main/res/values/strings.xml'
-          echo cGFja2FnZSBjb20uYXBrZmFjdG9yeS5hcHA7CmltcG9ydCBhbmRyb2lkLmFwcC5BY3Rpdml0eTsgaW1wb3J0IGFuZHJvaWQub3MuQnVuZGxlOyBpbXBvcnQgYW5kcm9pZC5jb250ZW50LkludGVudDsKaW1wb3J0IGFuZHJvaWQud2Via2l0Lio7CnB1YmxpYyBjbGFzcyBNYWluQWN0aXZpdHkgZXh0ZW5kcyBBY3Rpdml0eSB7CiAgcHJpdmF0ZSBXZWJWaWV3IHc7CiAgQE92ZXJyaWRlIHByb3RlY3RlZCB2b2lkIG9uQ3JlYXRlKEJ1bmRsZSBiKSB7CiAgICBzdXBlci5vbkNyZWF0ZShiKTsKICAgIHcgPSBuZXcgV2ViVmlldyh0aGlzKTsKICAgIFdlYlNldHRpbmdzIHMgPSB3LmdldFNldHRpbmdzKCk7CiAgICBzLnNldEphdmFTY3JpcHRFbmFibGVkKHRydWUpOyBzLnNldERvbVN0b3JhZ2VFbmFibGVkKHRydWUpOwogICAgdy5zZXRXZWJWaWV3Q2xpZW50KG5ldyBXZWJWaWV3Q2xpZW50KCkgewogICAgICBAT3ZlcnJpZGUgcHVibGljIGJvb2xlYW4gc2hvdWxkT3ZlcnJpZGVVcmxMb2FkaW5nKFdlYlZpZXcgdiwgV2ViUmVzb3VyY2VSZXF1ZXN0IHIpIHsKICAgICAgICBpZiAoci5nZXRVcmwoKS5nZXRTY2hlbWUoKS5zdGFydHNXaXRoKCJodHRwIikpIHsgc3RhcnRBY3Rpdml0eShuZXcgSW50ZW50KEludGVudC5BQ1RJT05fVklFVywgci5nZXRVcmwoKSkpOyByZXR1cm4gdHJ1ZTsgfQogICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgfQogICAgfSk7CiAgICBzZXRDb250ZW50Vmlldyh3KTsKICAgIHcubG9hZFVybCgiZmlsZTovLy9hbmRyb2lkX2Fzc2V0L2luZGV4Lmh0bWwiKTsKICB9CiAgQE92ZXJyaWRlIHB1YmxpYyB2b2lkIG9uQmFja1ByZXNzZWQoKSB7IGlmICh3LmNhbkdvQmFjaygpKSB3LmdvQmFjaygpOyBlbHNlIHN1cGVyLm9uQmFja1ByZXNzZWQoKTsgfQp9Cg== | w 'app/src/main/java/com/apkfactory/app/MainActivity.java'
-          echo PCFET0NUWVBFIGh0bWw+CjxodG1sIGxhbmc9ImFyIiBkaXI9InJ0bCI+CjxoZWFkPgo8bWV0YSBjaGFyc2V0PSJ1dGYtOCI+CjxtZXRhIG5hbWU9InZpZXdwb3J0IiBjb250ZW50PSJ3aWR0aD1kZXZpY2Utd2lkdGgsIGluaXRpYWwtc2NhbGU9MSI+Cjx0aXRsZT7Zhdi12YbYuSBBUEs8L3RpdGxlPgo8c3R5bGU+Cjpyb290ey0tYmc6I2Y0ZjdmNDstLWNhcmQ6I2ZmZjstLXR4OiMxNzIwMWE7LS1tdTojNjI3MDVmOy0tYWM6IzJlN2Q0ZjstLWJkOiNkY2U1ZGN9CkBtZWRpYSAocHJlZmVycy1jb2xvci1zY2hlbWU6ZGFyayl7OnJvb3R7LS1iZzojMTMxYTE1Oy0tY2FyZDojMWMyNjFmOy0tdHg6I2VhZjJlYjstLW11OiM5YmFiOWM7LS1hYzojNGNiYjdhOy0tYmQ6IzJkM2IzMH19Cip7Ym94LXNpemluZzpib3JkZXItYm94fQpib2R5e21hcmdpbjowO2JhY2tncm91bmQ6dmFyKC0tYmcpO2NvbG9yOnZhcigtLXR4KTtmb250LWZhbWlseTpUYWhvbWEsIk5vdG8gU2FucyBBcmFiaWMiLEFyaWFsLHNhbnMtc2VyaWY7bGluZS1oZWlnaHQ6MS43fQoud3ttYXgtd2lkdGg6NzAwcHg7bWFyZ2luOjAgYXV0bztwYWRkaW5nOjI0cHggMTZweCA0MHB4fQpoMXtmb250LXNpemU6MjRweDttYXJnaW46MCAwIDRweH0uc3tjb2xvcjp2YXIoLS1tdSk7bWFyZ2luOjAgMCAxNHB4fQouY3tiYWNrZ3JvdW5kOnZhcigtLWNhcmQpO2JvcmRlcjoxcHggc29saWQgdmFyKC0tYmQpO2JvcmRlci1yYWRpdXM6MTRweDtwYWRkaW5nOjE0cHg7bWFyZ2luLWJvdHRvbToxNHB4fQpsYWJlbHtkaXNwbGF5OmJsb2NrO2ZvbnQtd2VpZ2h0OjcwMDttYXJnaW46MTBweCAwIDRweDtmb250LXNpemU6MTRweH0KaW5wdXQsdGV4dGFyZWF7d2lkdGg6MTAwJTtib3JkZXI6MXB4IHNvbGlkIHZhcigtLWJkKTtib3JkZXItcmFkaXVzOjEwcHg7cGFkZGluZzoxMHB4O2ZvbnQ6aW5oZXJpdDtiYWNrZ3JvdW5kOnZhcigtLWJnKTtjb2xvcjp2YXIoLS10eCl9Ci5se2RpcmVjdGlvbjpsdHI7dGV4dC1hbGlnbjpsZWZ0fXRleHRhcmVhe21pbi1oZWlnaHQ6MTQwcHg7Zm9udC1zaXplOjEycHh9Ci5yb3d7ZGlzcGxheTpmbGV4O2dhcDoxMHB4fS5yb3c+ZGl2e2ZsZXg6MX0KYnV0dG9ue3dpZHRoOjEwMCU7bWFyZ2luLXRvcDoxMnB4O3BhZGRpbmc6MTJweDtib3JkZXI6MDtib3JkZXItcmFkaXVzOjEwcHg7YmFja2dyb3VuZDp2YXIoLS1hYyk7Y29sb3I6I2ZmZjtmb250OmluaGVyaXQ7Zm9udC13ZWlnaHQ6NzAwfQpidXR0b246ZGlzYWJsZWR7b3BhY2l0eTouNTV9CiNsb2d7d2hpdGUtc3BhY2U6cHJlLXdyYXA7Zm9udC1zaXplOjE0cHg7Y29sb3I6dmFyKC0tbXUpfQoubm90ZXtmb250LXNpemU6MTNweDtjb2xvcjp2YXIoLS1tdSl9CmF7Y29sb3I6dmFyKC0tYWMpfQo8L3N0eWxlPjwvaGVhZD4KPGJvZHk+PGRpdiBjbGFzcz0idyI+CjxoMT7wn4+tINmF2LXZhti5IEFQSzwvaDE+CjxwIGNsYXNzPSJzIj7Yp9mE2LXZgiDZg9mI2K8g2KrYt9io2YrZgtmD2Iwg2YjYs9mK2Y/Zhti02KMg2YXZhNmBIEFQSyDYrNin2YfYsiDYudio2LEg2K7ZiNin2K/ZhSBHaXRIdWIuPC9wPgoKPGRpdiBjbGFzcz0iYyI+CiAgPGxhYmVsPtmF2YHYqtin2K0gR2l0SHViIChUb2tlbik8L2xhYmVsPgogIDxpbnB1dCBpZD0idG9rIiBjbGFzcz0ibCIgdHlwZT0icGFzc3dvcmQiIHBsYWNlaG9sZGVyPSJnaHBfLi4uIj4KICA8ZGl2IGNsYXNzPSJub3RlIj7Yo9mG2LTYptmHINmF2YY6IEdpdEh1YiDilrggU2V0dGluZ3Mg4pa4IERldmVsb3BlciBzZXR0aW5ncyDilrggUGVyc29uYWwgYWNjZXNzIHRva2VucyDilrggVG9rZW5zIChjbGFzc2ljKdiMINmI2YHYudmR2YQg2KfZhNi12YTYp9it2YrYqtmK2YYgPGI+cmVwbzwvYj4g2Yg8Yj53b3JrZmxvdzwvYj4uINmK2Y/YrdmB2Lgg2LnZhNmJINis2YfYp9iy2YMg2YHZgti3LjwvZGl2Pgo8L2Rpdj4KCjxkaXYgY2xhc3M9ImMiPgogIDxkaXYgY2xhc3M9InJvdyI+CiAgICA8ZGl2PjxsYWJlbD7Yp9iz2YUg2KfZhNiq2LfYqNmK2YI8L2xhYmVsPjxpbnB1dCBpZD0ibmFtZSIgdmFsdWU9Itiq2LfYqNmK2YLZiiI+PC9kaXY+CiAgICA8ZGl2PjxsYWJlbD7Zhdi52LHZkdmBINin2YTYrdiy2YXYqTwvbGFiZWw+PGlucHV0IGlkPSJwa2ciIGNsYXNzPSJsIiB2YWx1ZT0iY29tLmV4YW1wbGUubXlhcHAiPjwvZGl2PgogIDwvZGl2PgogIDxsYWJlbD7Zg9mI2K8gSFRNTCDZhNmE2KrYt9io2YrZgjwvbGFiZWw+CiAgPHRleHRhcmVhIGlkPSJodG1sIiBjbGFzcz0ibCIgcGxhY2Vob2xkZXI9IjwhRE9DVFlQRSBodG1sPi4uLiI+PC90ZXh0YXJlYT4KICA8YnV0dG9uIGlkPSJnbyI+8J+agCDYp9io2YbZkCBBUEs8L2J1dHRvbj4KPC9kaXY+Cgo8ZGl2IGNsYXNzPSJjIj48ZGl2IGlkPSJsb2ciPtis2KfZh9iyLjwvZGl2PgogIDxidXR0b24gaWQ9ImRsIiBoaWRkZW4+4qyH77iPINiq2YbYstmK2YQgQVBLPC9idXR0b24+CiAgPGRpdiBpZD0ibG5rIiBjbGFzcz0ibm90ZSBsIiBzdHlsZT0ibWFyZ2luLXRvcDo4cHgiPjwvZGl2Pgo8L2Rpdj4KPGRpdiBjbGFzcz0ibm90ZSI+2KrZhtio2YrZhzog2KfZhNmF2LPYqtmI2K/YuSDYp9mE2LDZiiDZitmP2YbYtNijINi52KfZhdiMINmB2YrYs9iq2LfZiti5INij2Yog2LTYrti1INix2KTZitipINmD2YjYryDYp9mE2KrYt9io2YrZgiDZiNiq2YbYstmK2YTZhy48L2Rpdj4KPC9kaXY+CjxzY3JpcHQ+CmNvbnN0ICQ9aWQ9PmRvY3VtZW50LmdldEVsZW1lbnRCeUlkKGlkKTsKY29uc3Qgc2xlZXA9bXM9Pm5ldyBQcm9taXNlKHI9PnNldFRpbWVvdXQocixtcykpOwpjb25zdCBiNjQ9cz0+e2NvbnN0IHU9bmV3IFRleHRFbmNvZGVyKCkuZW5jb2RlKHMpO2xldCByPScnO2ZvcihsZXQgaT0wO2k8dS5sZW5ndGg7aSs9ODE5MilyKz1TdHJpbmcuZnJvbUNoYXJDb2RlLmFwcGx5KG51bGwsdS5zdWJhcnJheShpLGkrODE5MikpO3JldHVybiBidG9hKHIpfTsKdHJ5eyQoJ3RvaycpLnZhbHVlPWxvY2FsU3RvcmFnZS5nZXRJdGVtKCdnaF90b2snKXx8Jyd9Y2F0Y2goZSl7fQpjb25zdCBsb2c9dD0+eyQoJ2xvZycpLnRleHRDb250ZW50PXR9OwoKYXN5bmMgZnVuY3Rpb24gZ2gocGF0aCxvcHRzPXt9KXsKICBjb25zdCByPWF3YWl0IGZldGNoKCJodHRwczovL2FwaS5naXRodWIuY29tIitwYXRoLHsuLi5vcHRzLGhlYWRlcnM6eyJBdXRob3JpemF0aW9uIjoiQmVhcmVyICIrJCgndG9rJykudmFsdWUudHJpbSgpLCJBY2NlcHQiOiJhcHBsaWNhdGlvbi92bmQuZ2l0aHViK2pzb24iLCJDb250ZW50LVR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn19KTsKICBjb25zdCB0PWF3YWl0IHIudGV4dCgpO2xldCBqO3RyeXtqPUpTT04ucGFyc2UodCl9Y2F0Y2goZSl7aj10fQogIGlmKCFyLm9rKXRocm93IG5ldyBFcnJvcigoaiYmai5tZXNzYWdlKXx8KCJIVFRQICIrci5zdGF0dXMpKTsKICByZXR1cm4gajsKfQoKZnVuY3Rpb24gcHJvamVjdChuYW1lLHBrZyxodG1sKXsKICBjb25zdCBwPXBrZy5yZXBsYWNlKC9cLi9nLCcvJyk7CiAgY29uc3Qgbm09bmFtZS5yZXBsYWNlKC8mL2csJyZhbXA7JykucmVwbGFjZSgvPC9nLCcmbHQ7JykucmVwbGFjZSgvJy9nLCJcXCciKS5yZXBsYWNlKC8iL2csJyZxdW90OycpOwogIHJldHVybiB7CiJzZXR0aW5ncy5ncmFkbGUiOiJwbHVnaW5NYW5hZ2VtZW50IHsgcmVwb3NpdG9yaWVzIHsgZ29vZ2xlKCk7IG1hdmVuQ2VudHJhbCgpOyBncmFkbGVQbHVnaW5Qb3J0YWwoKSB9IH1cbmRlcGVuZGVuY3lSZXNvbHV0aW9uTWFuYWdlbWVudCB7IHJlcG9zaXRvcmllcyB7IGdvb2dsZSgpOyBtYXZlbkNlbnRyYWwoKSB9IH1cbnJvb3RQcm9qZWN0Lm5hbWUgPSBcIkFwcFwiXG5pbmNsdWRlICc6YXBwJ1xuIiwKImJ1aWxkLmdyYWRsZSI6InBsdWdpbnMgeyBpZCAnY29tLmFuZHJvaWQuYXBwbGljYXRpb24nIHZlcnNpb24gJzguNS4yJyBhcHBseSBmYWxzZSB9XG4iLAoiZ3JhZGxlLnByb3BlcnRpZXMiOiJvcmcuZ3JhZGxlLmp2bWFyZ3M9LVhteDIwNDhtXG5hbmRyb2lkLnVzZUFuZHJvaWRYPXRydWVcbiIsCiJhcHAvYnVpbGQuZ3JhZGxlIjoicGx1Z2lucyB7IGlkICdjb20uYW5kcm9pZC5hcHBsaWNhdGlvbicgfVxuYW5kcm9pZCB7XG4gIG5hbWVzcGFjZSAnIitwa2crIidcbiAgY29tcGlsZVNkayAzNFxuICBkZWZhdWx0Q29uZmlnIHsgYXBwbGljYXRpb25JZCAnIitwa2crIic7IG1pblNkayAyNDsgdGFyZ2V0U2RrIDM0OyB2ZXJzaW9uQ29kZSAxOyB2ZXJzaW9uTmFtZSAnMS4wJyB9XG4gIGNvbXBpbGVPcHRpb25zIHsgc291cmNlQ29tcGF0aWJpbGl0eSBKYXZhVmVyc2lvbi5WRVJTSU9OXzE3OyB0YXJnZXRDb21wYXRpYmlsaXR5IEphdmFWZXJzaW9uLlZFUlNJT05fMTcgfVxufVxuIiwKImFwcC9zcmMvbWFpbi9BbmRyb2lkTWFuaWZlc3QueG1sIjonPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz5cbjxtYW5pZmVzdCB4bWxuczphbmRyb2lkPSJodHRwOi8vc2NoZW1hcy5hbmRyb2lkLmNvbS9hcGsvcmVzL2FuZHJvaWQiPlxuICA8dXNlcy1wZXJtaXNzaW9uIGFuZHJvaWQ6bmFtZT0iYW5kcm9pZC5wZXJtaXNzaW9uLklOVEVSTkVUIi8+XG4gIDxhcHBsaWNhdGlvbiBhbmRyb2lkOmxhYmVsPSJAc3RyaW5nL2FwcF9uYW1lIiBhbmRyb2lkOmljb249IkBhbmRyb2lkOmRyYXdhYmxlL3N5bV9kZWZfYXBwX2ljb24iIGFuZHJvaWQ6c3VwcG9ydHNSdGw9InRydWUiPlxuICAgIDxhY3Rpdml0eSBhbmRyb2lkOm5hbWU9Ii5NYWluQWN0aXZpdHkiIGFuZHJvaWQ6ZXhwb3J0ZWQ9InRydWUiPlxuICAgICAgPGludGVudC1maWx0ZXI+PGFjdGlvbiBhbmRyb2lkOm5hbWU9ImFuZHJvaWQuaW50ZW50LmFjdGlvbi5NQUlOIi8+PGNhdGVnb3J5IGFuZHJvaWQ6bmFtZT0iYW5kcm9pZC5pbnRlbnQuY2F0ZWdvcnkuTEFVTkNIRVIiLz48L2ludGVudC1maWx0ZXI+XG4gICAgPC9hY3Rpdml0eT5cbiAgPC9hcHBsaWNhdGlvbj5cbjwvbWFuaWZlc3Q+XG4nLAoiYXBwL3NyYy9tYWluL3Jlcy92YWx1ZXMvc3RyaW5ncy54bWwiOic8cmVzb3VyY2VzPjxzdHJpbmcgbmFtZT0iYXBwX25hbWUiPicrbm0rJzwvc3RyaW5nPjwvcmVzb3VyY2VzPlxuJywKWyJhcHAvc3JjL21haW4vamF2YS8iK3ArIi9NYWluQWN0aXZpdHkuamF2YSJdOiJwYWNrYWdlICIrcGtnKyI7XG5pbXBvcnQgYW5kcm9pZC5hcHAuQWN0aXZpdHk7IGltcG9ydCBhbmRyb2lkLm9zLkJ1bmRsZTsgaW1wb3J0IGFuZHJvaWQuY29udGVudC5JbnRlbnQ7XG5pbXBvcnQgYW5kcm9pZC53ZWJraXQuKjtcbnB1YmxpYyBjbGFzcyBNYWluQWN0aXZpdHkgZXh0ZW5kcyBBY3Rpdml0eSB7XG4gIHByaXZhdGUgV2ViVmlldyB3O1xuICBAT3ZlcnJpZGUgcHJvdGVjdGVkIHZvaWQgb25DcmVhdGUoQnVuZGxlIGIpIHtcbiAgICBzdXBlci5vbkNyZWF0ZShiKTtcbiAgICB3ID0gbmV3IFdlYlZpZXcodGhpcyk7XG4gICAgV2ViU2V0dGluZ3MgcyA9IHcuZ2V0U2V0dGluZ3MoKTtcbiAgICBzLnNldEphdmFTY3JpcHRFbmFibGVkKHRydWUpOyBzLnNldERvbVN0b3JhZ2VFbmFibGVkKHRydWUpO1xuICAgIHcuc2V0V2ViVmlld0NsaWVudChuZXcgV2ViVmlld0NsaWVudCgpIHtcbiAgICAgIEBPdmVycmlkZSBwdWJsaWMgYm9vbGVhbiBzaG91bGRPdmVycmlkZVVybExvYWRpbmcoV2ViVmlldyB2LCBXZWJSZXNvdXJjZVJlcXVlc3Qgcikge1xuICAgICAgICBpZiAoci5nZXRVcmwoKS5nZXRTY2hlbWUoKS5zdGFydHNXaXRoKFwiaHR0cFwiKSkgeyBzdGFydEFjdGl2aXR5KG5ldyBJbnRlbnQoSW50ZW50LkFDVElPTl9WSUVXLCByLmdldFVybCgpKSk7IHJldHVybiB0cnVlOyB9XG4gICAgICAgIHJldHVybiBmYWxzZTtcbiAgICAgIH1cbiAgICB9KTtcbiAgICBzZXRDb250ZW50Vmlldyh3KTtcbiAgICB3LmxvYWRVcmwoXCJmaWxlOi8vL2FuZHJvaWRfYXNzZXQvaW5kZXguaHRtbFwiKTtcbiAgfVxuICBAT3ZlcnJpZGUgcHVibGljIHZvaWQgb25CYWNrUHJlc3NlZCgpIHsgaWYgKHcuY2FuR29CYWNrKCkpIHcuZ29CYWNrKCk7IGVsc2Ugc3VwZXIub25CYWNrUHJlc3NlZCgpOyB9XG59XG4iLAoiYXBwL3NyYy9tYWluL2Fzc2V0cy9pbmRleC5odG1sIjpodG1sCiAgfTsKfQoKZnVuY3Rpb24gbWFrZVltbChuYW1lLHBrZyxodG1sKXsKICBjb25zdCBmPXByb2plY3QobmFtZSxwa2csaHRtbCksST0iICAgICAgICAgICI7CiAgY29uc3QgcnVuPVsic2V0IC1lIiwibWtkaXIgYXBwX2J1aWxkICYmIGNkIGFwcF9idWlsZCIsJ3coKXsgbWtkaXIgLXAgIiQoZGlybmFtZSAiJDEiKSI7IGJhc2U2NCAtZCA+ICIkMSI7IH0nXTsKICBmb3IoY29uc3QgayBpbiBmKXJ1bi5wdXNoKCJlY2hvICIrYjY0KGZba10pKyIgfCB3ICciK2srIiciKTsKICByZXR1cm4gWwoibmFtZTogQnVpbGQgQVBLIiwib246IiwiICBwdXNoOiIsIiAgd29ya2Zsb3dfZGlzcGF0Y2g6IiwicGVybWlzc2lvbnM6IiwiICBjb250ZW50czogd3JpdGUiLCJqb2JzOiIsIiAgYnVpbGQ6IiwiICAgIHJ1bnMtb246IHVidW50dS1sYXRlc3QiLCIgICAgc3RlcHM6IiwKIiAgICAgIC0gdXNlczogYWN0aW9ucy9zZXR1cC1qYXZhQHY0IiwiICAgICAgICB3aXRoOiIsIiAgICAgICAgICBkaXN0cmlidXRpb246IHRlbXVyaW4iLCIgICAgICAgICAgamF2YS12ZXJzaW9uOiAnMTcnIiwKIiAgICAgIC0gdXNlczogZ3JhZGxlL2FjdGlvbnMvc2V0dXAtZ3JhZGxlQHY0IiwiICAgICAgICB3aXRoOiIsIiAgICAgICAgICBncmFkbGUtdmVyc2lvbjogJzguNyciLAoiICAgICAgLSBuYW1lOiBDcmVhdGUgcHJvamVjdCIsIiAgICAgICAgcnVuOiB8IiwuLi5ydW4ubWFwKGw9PkkrbCksCiIgICAgICAtIG5hbWU6IEJ1aWxkIiwiICAgICAgICB3b3JraW5nLWRpcmVjdG9yeTogYXBwX2J1aWxkIiwiICAgICAgICBydW46IGdyYWRsZSBhc3NlbWJsZURlYnVnIiwKIiAgICAgIC0gbmFtZTogUHVibGlzaCByZWxlYXNlIiwiICAgICAgICBlbnY6IiwiICAgICAgICAgIEdIX1RPS0VOOiAke3sgZ2l0aHViLnRva2VuIH19IiwiICAgICAgICBydW46IHwiLApJKydnaCByZWxlYXNlIGNyZWF0ZSAidiR7eyBnaXRodWIucnVuX251bWJlciB9fSIgYXBwX2J1aWxkL2FwcC9idWlsZC9vdXRwdXRzL2Fway9kZWJ1Zy9hcHAtZGVidWcuYXBrIC0tcmVwbyAiJEdJVEhVQl9SRVBPU0lUT1JZIiAtLXRpdGxlICJBUEsiIC0tbm90ZXMgInJlYWR5IicsIiIKICBdLmpvaW4oIlxuIik7Cn0KCiQoJ2dvJykub25jbGljaz1hc3luYygpPT57CiAgY29uc3QgbmFtZT0kKCduYW1lJykudmFsdWUudHJpbSgpfHwiQXBwIixwa2c9JCgncGtnJykudmFsdWUudHJpbSgpLGh0bWw9JCgnaHRtbCcpLnZhbHVlLHRvaz0kKCd0b2snKS52YWx1ZS50cmltKCk7CiAgaWYoIXRvaylyZXR1cm4gbG9nKCLYo9iv2K7ZhCDZhdmB2KrYp9itIEdpdEh1YiDYo9mI2YTYp9mLIik7CiAgaWYoIS9eW2Etel1bYS16MC05X10qKFwuW2Etel1bYS16MC05X10qKSskLy50ZXN0KHBrZykpcmV0dXJuIGxvZygi2YXYudix2ZHZgSDYp9mE2K3YstmF2Kkg2LrZitixINi12KfZhNitICjZhdir2KfZhDogY29tLmV4YW1wbGUubXlhcHApIik7CiAgaWYoIWh0bWwudHJpbSgpKXJldHVybiBsb2coItin2YTYtdmCINmD2YjYryBIVE1MINij2YjZhNin2YsiKTsKICB0cnl7bG9jYWxTdG9yYWdlLnNldEl0ZW0oJ2doX3RvaycsdG9rKX1jYXRjaChlKXt9CiAgJCgnZ28nKS5kaXNhYmxlZD10cnVlOyQoJ2RsJykuaGlkZGVuPXRydWU7JCgnbG5rJykudGV4dENvbnRlbnQ9Jyc7CiAgdHJ5ewogICAgbG9nKCIxLzQg2KfZhNiq2K3ZgtmCINmF2YYg2KfZhNit2LPYp9ioLi4uIik7CiAgICBjb25zdCBtZT1hd2FpdCBnaCgiL3VzZXIiKTsKICAgIGNvbnN0IHJlcG89ImFway0iK3BrZy5yZXBsYWNlKC9cLi9nLCctJykrIi0iK0RhdGUubm93KCkudG9TdHJpbmcoMzYpOwogICAgbG9nKCIyLzQg2KXZhti02KfYoSDYp9mE2YXYs9iq2YjYr9i5Li4uIik7CiAgICBhd2FpdCBnaCgiL3VzZXIvcmVwb3MiLHttZXRob2Q6IlBPU1QiLGJvZHk6SlNPTi5zdHJpbmdpZnkoe25hbWU6cmVwbyxwcml2YXRlOmZhbHNlLGF1dG9faW5pdDp0cnVlfSl9KTsKICAgIGF3YWl0IHNsZWVwKDQwMDApOwogICAgbG9nKCIzLzQg2LHZgdi5INmF2YTZgSDYp9mE2KjZhtin2KEuLi4iKTsKICAgIGNvbnN0IGJhc2U9Ii9yZXBvcy8iK21lLmxvZ2luKyIvIityZXBvOwogICAgYXdhaXQgZ2goYmFzZSsiL2NvbnRlbnRzLy5naXRodWIvd29ya2Zsb3dzL2J1aWxkLnltbCIse21ldGhvZDoiUFVUIixib2R5OkpTT04uc3RyaW5naWZ5KHttZXNzYWdlOiJhZGQgYnVpbGQiLGNvbnRlbnQ6YjY0KG1ha2VZbWwobmFtZSxwa2csaHRtbCkpfSl9KTsKICAgIGNvbnN0IHQwPURhdGUubm93KCk7bGV0IGRpc3BhdGNoZWQ9ZmFsc2UscnVuPW51bGw7CiAgICB3aGlsZShEYXRlLm5vdygpLXQwPDIwKjYwKjEwMDApewogICAgICBhd2FpdCBzbGVlcCgxMDAwMCk7CiAgICAgIGNvbnN0IHJzPWF3YWl0IGdoKGJhc2UrIi9hY3Rpb25zL3J1bnM/cGVyX3BhZ2U9MSIpOwogICAgICBydW49cnMud29ya2Zsb3dfcnVucyYmcnMud29ya2Zsb3dfcnVuc1swXTsKICAgICAgaWYoIXJ1bil7CiAgICAgICAgaWYoIWRpc3BhdGNoZWQmJkRhdGUubm93KCktdDA+NDAwMDApe2Rpc3BhdGNoZWQ9dHJ1ZTt0cnl7YXdhaXQgZ2goYmFzZSsiL2FjdGlvbnMvd29ya2Zsb3dzL2J1aWxkLnltbC9kaXNwYXRjaGVzIix7bWV0aG9kOiJQT1NUIixib2R5OkpTT04uc3RyaW5naWZ5KHtyZWY6Im1haW4ifSl9KX1jYXRjaChlKXt9fQogICAgICAgIGxvZygiNC80INio2KfZhtiq2LjYp9ixINio2K/YoSDYp9mE2KjZhtin2KEuLi4g4o+zIik7Y29udGludWU7CiAgICAgIH0KICAgICAgbG9nKCI0LzQg2KzYp9ix2Y0g2KfZhNio2YbYp9ihICgiK01hdGgucm91bmQoKERhdGUubm93KCktdDApLzEwMDApKyIg2KvYp9mG2YrYqSkg4o+zIik7CiAgICAgIGlmKHJ1bi5zdGF0dXM9PT0iY29tcGxldGVkIilicmVhazsKICAgIH0KICAgIGlmKCFydW58fHJ1bi5zdGF0dXMhPT0iY29tcGxldGVkIil0aHJvdyBuZXcgRXJyb3IoItin2LPYqti62LHZgiDYp9mE2KjZhtin2KEg2YjZgtiq2YvYpyDYt9mI2YrZhNmL2KciKTsKICAgIGlmKHJ1bi5jb25jbHVzaW9uIT09InN1Y2Nlc3MiKXRocm93IG5ldyBFcnJvcigi2YHYtNmEINin2YTYqNmG2KfYodiMINix2KfYrNi5INin2YTYqtmB2KfYtdmK2YQ6ICIrcnVuLmh0bWxfdXJsKTsKICAgIGNvbnN0IHJlbD1hd2FpdCBnaChiYXNlKyIvcmVsZWFzZXMvbGF0ZXN0Iik7CiAgICBjb25zdCB1cmw9cmVsLmFzc2V0c1swXS5icm93c2VyX2Rvd25sb2FkX3VybDsKICAgIGxvZygi2KrZhSDYqNmG2KfYoSDYp9mE2KrYt9io2YrZgiDinJMiKTsKICAgICQoJ2xuaycpLnRleHRDb250ZW50PXVybDskKCdkbCcpLmhpZGRlbj1mYWxzZTskKCdkbCcpLm9uY2xpY2s9KCk9Pntsb2NhdGlvbi5ocmVmPXVybH07CiAgfWNhdGNoKGUpe2xvZygi2K7Yt9ijOiAiK2UubWVzc2FnZSl9CiAgJCgnZ28nKS5kaXNhYmxlZD1mYWxzZTsKfTsKPC9zY3JpcHQ+PC9ib2R5PjwvaHRtbD4K | w 'app/src/main/assets/index.html'
-      - name: Build
+          flutter create -a kotlin --org com.dataly --project-name dataly --platforms=android app_build
+          cd app_build
+          flutter pub add permission_handler
+          flutter pub add flutter_localizations --sdk=flutter
+
+      - name: Write Android resources (widget, tile icon, file provider)
+        run: |
+          mkdir -p app_build/android/app/src/main/res/drawable app_build/android/app/src/main/res/layout app_build/android/app/src/main/res/xml
+          cat << 'EOF' > app_build/android/app/src/main/res/drawable/ic_stat_speed.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M8,4 L8,14 L5,14 L9,19 L13,14 L10,14 L10,4 Z" />
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M16,20 L16,10 L13,10 L17,5 L21,10 L18,10 L18,20 Z" />
+          </vector>
+          EOF
+
+          cat << 'EOF' > app_build/android/app/src/main/res/drawable/widget_bg.xml
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="#FF141A2B" />
+              <corners android:radius="20dp" />
+          </shape>
+          EOF
+
+          cat << 'EOF' > app_build/android/app/src/main/res/layout/widget_usage.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/w_root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@drawable/widget_bg"
+              android:orientation="vertical"
+              android:padding="12dp">
+              <TextView
+                  android:id="@+id/w_today_label"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="0dp"
+                  android:textColor="#FFFFFF"
+                  android:textSize="13sp"
+                  android:textStyle="bold" />
+              <TextView
+                  android:id="@+id/w_today_wifi"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="0dp"
+                  android:textColor="#5B8CFF"
+                  android:textSize="15sp"
+                  android:textStyle="normal" />
+              <TextView
+                  android:id="@+id/w_today_mob"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="0dp"
+                  android:textColor="#2EE6A6"
+                  android:textSize="15sp"
+                  android:textStyle="normal" />
+              <TextView
+                  android:id="@+id/w_cycle_label"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="6dp"
+                  android:textColor="#FFFFFF"
+                  android:textSize="13sp"
+                  android:textStyle="bold" />
+              <TextView
+                  android:id="@+id/w_cycle_wifi"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="0dp"
+                  android:textColor="#5B8CFF"
+                  android:textSize="15sp"
+                  android:textStyle="normal" />
+              <TextView
+                  android:id="@+id/w_cycle_mob"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="0dp"
+                  android:textColor="#2EE6A6"
+                  android:textSize="15sp"
+                  android:textStyle="normal" />
+          </LinearLayout>
+          EOF
+
+          cat << 'EOF' > app_build/android/app/src/main/res/xml/widget_info.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:initialLayout="@layout/widget_usage"
+              android:minWidth="180dp"
+              android:minHeight="110dp"
+              android:resizeMode="horizontal|vertical"
+              android:updatePeriodMillis="0"
+              android:widgetCategory="home_screen" />
+          EOF
+
+          cat << 'EOF' > app_build/android/app/src/main/res/xml/file_paths.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <cache-path name="exports" path="exports/" />
+          </paths>
+          EOF
+
+      - name: Configure Android Manifest
+        run: |
+          cat << 'EOF' > app_build/android/app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+
+              <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+                  tools:ignore="ProtectedPermissions" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <!-- Only needed on Android 8-9 to read mobile-data usage -->
+              <uses-permission android:name="android.permission.READ_PHONE_STATE"
+                  android:maxSdkVersion="28" />
+
+              <application
+                  android:label="Dataly"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:taskAffinity=""
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                          android:name="io.flutter.embedding.android.NormalTheme"
+                          android:resource="@style/NormalTheme" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <!-- Live speed notification -->
+                  <service
+                      android:name=".SpeedService"
+                      android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="Shows live network speed in an ongoing notification" />
+                  </service>
+
+                  <!-- Quick Settings tile -->
+                  <service
+                      android:name=".SpeedTile"
+                      android:exported="true"
+                      android:icon="@drawable/ic_stat_speed"
+                      android:label="Live speed"
+                      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+                      <intent-filter>
+                          <action android:name="android.service.quicksettings.action.QS_TILE" />
+                      </intent-filter>
+                  </service>
+
+                  <!-- Periodic history + limit checks, boot / update -->
+                  <receiver android:name=".MonitorReceiver" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                      </intent-filter>
+                  </receiver>
+
+                  <!-- Home-screen widget -->
+                  <receiver android:name=".DatalyWidget" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.appwidget.provider"
+                          android:resource="@xml/widget_info" />
+                  </receiver>
+
+                  <!-- CSV sharing -->
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
+
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
+              </application>
+
+              <!-- Package visibility (replaces QUERY_ALL_PACKAGES, which Google Play restricts) -->
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.PROCESS_TEXT" />
+                      <data android:mimeType="text/plain" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.settings.IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS" />
+                      <data android:scheme="package" />
+                  </intent>
+              </queries>
+          </manifest>
+          EOF
+
+      - name: Write Native Kotlin Bridge (MainActivity.kt)
+        run: |
+          mkdir -p app_build/android/app/src/main/kotlin/com/dataly/dataly
+          cat << 'EOF' > app_build/android/app/src/main/kotlin/com/dataly/dataly/MainActivity.kt
+          package com.dataly.dataly
+
+          import android.Manifest
+          import android.app.AlarmManager
+          import android.app.AppOpsManager
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.app.usage.NetworkStats
+          import android.app.usage.NetworkStatsManager
+          import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
+          import android.content.ActivityNotFoundException
+          import android.content.BroadcastReceiver
+          import android.content.ComponentName
+          import android.content.ContentValues
+          import android.content.Context
+          import android.content.Intent
+          import android.content.SharedPreferences
+          import android.content.pm.PackageManager
+          import android.content.pm.ServiceInfo
+          import android.database.sqlite.SQLiteDatabase
+          import android.database.sqlite.SQLiteOpenHelper
+          import android.net.ConnectivityManager
+          import android.net.TrafficStats
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.os.Process
+          import android.os.SystemClock
+          import android.provider.Settings
+          import android.service.quicksettings.Tile
+          import android.service.quicksettings.TileService
+          import android.telephony.TelephonyManager
+          import android.widget.RemoteViews
+          import androidx.core.app.NotificationCompat
+          import androidx.core.content.FileProvider
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Calendar
+          import java.util.Date
+          import java.util.Locale
+          import java.util.concurrent.atomic.AtomicBoolean
+          import org.json.JSONObject
+
+          // ---------------------------------------------------------------- Core
+          object Core {
+              const val CH_ALERTS = "alerts"
+              const val CH_SPEED = "speed"
+              private val lock = Any()
+
+              class Use(var total: Long = 0L, var fg: Long = 0L)
+
+              // ---------------- prefs & strings ----------------
+              fun prefs(c: Context): SharedPreferences =
+                  c.applicationContext.getSharedPreferences("dataly", Context.MODE_PRIVATE)
+
+              /** Localized strings pushed from Flutter (notifications, widget, tile). */
+              fun str(c: Context, key: String, def: String = ""): String =
+                  prefs(c).getString("s_$key", null)?.takeIf { it.isNotEmpty() } ?: def
+
+              fun limits(c: Context): JSONObject =
+                  try { JSONObject(prefs(c).getString("limits", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
+
+              fun billingDay(c: Context): Int = prefs(c).getInt("bill", 1).coerceIn(1, 28)
+
+              // ---------------- permissions ----------------
+              @Suppress("DEPRECATION")
+              fun hasUsageAccess(c: Context): Boolean {
+                  val a = c.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+                  val mode = if (Build.VERSION.SDK_INT >= 29)
+                      a.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.packageName)
+                  else
+                      a.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.packageName)
+                  return mode == AppOpsManager.MODE_ALLOWED
+              }
+
+              /** Android 8-9 need the subscriber id to read mobile-data stats; Android 10+ accept null. */
+              @Suppress("DEPRECATION", "HardwareIds", "MissingPermission")
+              private fun subscriber(c: Context, type: Int): String? {
+                  if (type != ConnectivityManager.TYPE_MOBILE || Build.VERSION.SDK_INT >= 29) return null
+                  return try {
+                      if (c.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) null
+                      else (c.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager).subscriberId
+                  } catch (_: Exception) { null }
+              }
+
+              // ---------------- network stats ----------------
+              fun usageByUid(c: Context, type: Int, s: Long, e: Long): Map<Int, Use> {
+                  val out = HashMap<Int, Use>()
+                  try {
+                      val m = c.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+                      val st = m.querySummary(type, subscriber(c, type), s, e)
+                      val b = NetworkStats.Bucket()
+                      try {
+                          while (st.hasNextBucket()) {
+                              st.getNextBucket(b)
+                              val u = out.getOrPut(b.uid) { Use() }
+                              val x = b.rxBytes + b.txBytes
+                              u.total += x
+                              if (b.state == NetworkStats.Bucket.STATE_FOREGROUND) u.fg += x
+                          }
+                      } finally { st.close() }
+                  } catch (_: Exception) {}
+                  return out
+              }
+
+              fun device(c: Context, type: Int, s: Long, e: Long): Long = try {
+                  val m = c.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+                  val b = m.querySummaryForDevice(type, subscriber(c, type), s, e)
+                  b.rxBytes + b.txBytes
+              } catch (_: Exception) { 0L }
+
+              fun typeInt(n: String) =
+                  if (n == "wifi") ConnectivityManager.TYPE_WIFI else ConnectivityManager.TYPE_MOBILE
+
+              /** Live (non-stored) hourly buckets, used for the "Today" chart. */
+              fun hourly(c: Context, s: Long, e: Long, n: Int): Pair<List<Long>, List<Long>> {
+                  val step = (e - s) / n
+                  val now = System.currentTimeMillis()
+                  val w = ArrayList<Long>(); val m = ArrayList<Long>()
+                  for (i in 0 until n) {
+                      val a = s + i * step; val b = a + step
+                      if (a > now) { w.add(0L); m.add(0L) }
+                      else {
+                          w.add(device(c, ConnectivityManager.TYPE_WIFI, a, b))
+                          m.add(device(c, ConnectivityManager.TYPE_MOBILE, a, b))
+                      }
+                  }
+                  return Pair(w, m)
+              }
+
+              // ---------------- time helpers ----------------
+              fun dayStart(t: Long = System.currentTimeMillis()): Long {
+                  val c = Calendar.getInstance(); c.timeInMillis = t
+                  c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
+                  c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+                  return c.timeInMillis
+              }
+
+              fun addDays(t: Long, n: Int): Long {
+                  val c = Calendar.getInstance(); c.timeInMillis = t
+                  c.add(Calendar.DAY_OF_YEAR, n)
+                  return c.timeInMillis
+              }
+
+              fun nextDay(t: Long) = addDays(t, 1)
+
+              /** Start of the current billing cycle (same maths as the Dart side). */
+              fun cycleStart(c: Context, now: Long = System.currentTimeMillis()): Long {
+                  val d = billingDay(c)
+                  val cal = Calendar.getInstance(); cal.timeInMillis = now
+                  if (cal.get(Calendar.DAY_OF_MONTH) < d) cal.add(Calendar.MONTH, -1)
+                  cal.set(Calendar.DAY_OF_MONTH, d)
+                  cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
+                  cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+                  return cal.timeInMillis
+              }
+
+              fun cycleEnd(start: Long): Long {
+                  val cal = Calendar.getInstance(); cal.timeInMillis = start
+                  cal.add(Calendar.MONTH, 1)
+                  return cal.timeInMillis
+              }
+
+              fun periodStart(c: Context, p: String): Long = if (p == "month") cycleStart(c) else dayStart()
+              fun periodEnd(p: String, start: Long): Long = if (p == "month") cycleEnd(start) else nextDay(start)
+
+              // ---------------- formatting ----------------
+              fun fmt(b: Long): String {
+                  if (b < 1024) return "$b B"
+                  val u = arrayOf("KB", "MB", "GB", "TB")
+                  var v = b / 1024.0
+                  var i = 0
+                  while (v >= 1024 && i < 3) { v /= 1024; i++ }
+                  val f = if (v >= 100) "%.0f %s" else if (v >= 10) "%.1f %s" else "%.2f %s"
+                  return String.format(Locale.US, f, v, u[i])
+              }
+
+              fun appLabel(c: Context, pkg: String): String {
+                  val pm = c.packageManager
+                  return try { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() } catch (_: Exception) { pkg }
+              }
+
+              // ---------------- notifications ----------------
+              fun ensureChannels(c: Context) {
+                  val nm = c.getSystemService(NotificationManager::class.java)
+                  nm.createNotificationChannel(
+                      NotificationChannel(CH_ALERTS, str(c, "ch_alerts", "Limit alerts"), NotificationManager.IMPORTANCE_HIGH))
+                  nm.createNotificationChannel(
+                      NotificationChannel(CH_SPEED, str(c, "ch_speed", "Live speed"), NotificationManager.IMPORTANCE_LOW))
+              }
+
+              /** Opens the screen where the user can restrict this app's data. */
+              fun settingsIntent(c: Context, pkg: String): Intent {
+                  val uri = Uri.parse("package:$pkg")
+                  val i = Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS, uri)
+                  val ok = i.resolveActivity(c.packageManager) != null
+                  val r = if (ok) i else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri)
+                  return r.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+              }
+
+              private fun alert(c: Context, pkg: String, level: Int, used: Long, limit: Long) {
+                  val name = appLabel(c, pkg)
+                  val nm = c.getSystemService(NotificationManager::class.java)
+                  ensureChannels(c)
+                  val pi = PendingIntent.getActivity(
+                      c, pkg.hashCode(), settingsIntent(c, pkg),
+                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                  )
+                  val warn = level < 100
+                  fun fill(s: String) = s.replace("{app}", name)
+                      .replace("{pct}", (used * 100 / limit).toString())
+                      .replace("{used}", fmt(used)).replace("{limit}", fmt(limit))
+                  val title = fill(if (warn) str(c, "wtitle", "{app}") else str(c, "atitle", "{app}"))
+                  val body = fill(if (warn) str(c, "wbody") else str(c, "abody"))
+                  val n = NotificationCompat.Builder(c, CH_ALERTS)
+                      .setSmallIcon(R.drawable.ic_stat_speed)
+                      .setContentTitle(title)
+                      .setContentText(body)
+                      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                      .setPriority(NotificationCompat.PRIORITY_HIGH)
+                      .setAutoCancel(true)
+                      .setContentIntent(pi)
+                      .build()
+                  try { nm.notify(pkg.hashCode(), n) } catch (_: Exception) {}
+              }
+
+              // ---------------- limits ----------------
+              fun usedFor(c: Context, o: JSONObject, uid: Int, cache: HashMap<String, Map<Int, Use>>, now: Long): Long {
+                  val start = periodStart(c, o.optString("period", "month"))
+                  val net = o.optString("net", "mobile")
+                  val nets = if (net == "all") listOf("wifi", "mobile") else listOf(net)
+                  var used = 0L
+                  for (n in nets) {
+                      val map = cache.getOrPut("$n|$start") { usageByUid(c, typeInt(n), start, now) }
+                      used += map[uid]?.total ?: 0L
+                  }
+                  return used
+              }
+
+              /** Alerts at 80 %, 100 % and then every extra 50 % (150, 200 ...), once per period. */
+              fun checkLimits(c: Context) = synchronized(lock) { doCheck(c.applicationContext) }
+
+              private fun doCheck(c: Context) {
+                  val l = limits(c)
+                  if (l.length() == 0 || !hasUsageAccess(c)) return
+                  val now = System.currentTimeMillis()
+                  val pm = c.packageManager
+                  val cache = HashMap<String, Map<Int, Use>>()
+                  val old = prefs(c).getStringSet("notified", emptySet()) ?: emptySet()
+                  val cutoff = now - 70L * 86_400_000L
+                  val done = HashSet<String>(old.filter { (it.split("|").getOrNull(1)?.toLongOrNull() ?: 0L) > cutoff })
+                  var changed = done.size != old.size
+                  for (pkg in l.keys()) {
+                      try {
+                          val o = l.getJSONObject(pkg)
+                          val limit = o.getLong("bytes")
+                          if (limit <= 0) continue
+                          val uid = pm.getApplicationInfo(pkg, 0).uid
+                          val used = usedFor(c, o, uid, cache, now)
+                          val start = periodStart(c, o.optString("period", "month"))
+                          val pct = (used * 100 / limit).toInt()
+                          val level = when {
+                              pct < 80 -> 0
+                              pct < 100 -> 80
+                              else -> 100 + (pct - 100) / 50 * 50
+                          }
+                          if (level > 0 && done.add("$pkg|$start|$level")) {
+                              changed = true
+                              alert(c, pkg, level, used, limit)
+                          }
+                      } catch (_: Exception) {}
+                  }
+                  if (changed) prefs(c).edit().putStringSet("notified", done).apply()
+              }
+
+              // ---------------- background monitor ----------------
+              fun setSpeed(c: Context, on: Boolean) {
+                  prefs(c).edit().putBoolean("speed", on).apply()
+                  val i = Intent(c, SpeedService::class.java)
+                  try { if (on) c.startForegroundService(i) else c.stopService(i) } catch (_: Exception) {}
+              }
+
+              /** Inexact repeating alarm: records history + checks limits even when the app is closed. */
+              fun scheduleMonitor(c: Context) {
+                  val ctx = c.applicationContext
+                  val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                  val pi = PendingIntent.getBroadcast(
+                      ctx, 77, Intent(ctx, MonitorReceiver::class.java).setAction(MonitorReceiver.TICK),
+                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                  )
+                  am.setInexactRepeating(
+                      AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 60_000L,
+                      AlarmManager.INTERVAL_FIFTEEN_MINUTES, pi
+                  )
+              }
+          }
+
+          // ---------------------------------------------------------------- History
+          /** Local daily history (per app, per day) so long periods are not limited by Android's retention. */
+          object History {
+              const val TOTAL = "*"
+              private val running = AtomicBoolean(false)
+              private var helper: Helper? = null
+
+              private class Helper(c: Context) : SQLiteOpenHelper(c.applicationContext, "history.db", null, 1) {
+                  override fun onCreate(db: SQLiteDatabase) {
+                      db.execSQL(
+                          "CREATE TABLE daily(day INTEGER NOT NULL, pkg TEXT NOT NULL, " +
+                              "wifi INTEGER NOT NULL, mobile INTEGER NOT NULL, PRIMARY KEY(day, pkg))"
+                      )
+                  }
+                  override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
+              }
+
+              @Synchronized
+              private fun db(c: Context): SQLiteDatabase {
+                  val h = helper ?: Helper(c).also { helper = it }
+                  return h.writableDatabase
+              }
+
+              private fun pkgOf(pm: PackageManager, uid: Int): String {
+                  if (uid < 0) return "uid:$uid"
+                  val p = try { pm.getPackagesForUid(uid)?.firstOrNull() } catch (_: Exception) { null }
+                  if (p != null) return p
+                  val n = try { pm.getNameForUid(uid) } catch (_: Exception) { null }
+                  if (n != null && !n.contains(':')) return n
+                  return "uid:$uid"
+              }
+
+              // ---------------- writing ----------------
+              private fun syncDay(c: Context, start: Long) {
+                  if (!Core.hasUsageAccess(c)) return
+                  val end = Core.nextDay(start)
+                  val w = Core.usageByUid(c, ConnectivityManager.TYPE_WIFI, start, end)
+                  val m = Core.usageByUid(c, ConnectivityManager.TYPE_MOBILE, start, end)
+                  val pm = c.packageManager
+                  val rows = HashMap<String, LongArray>()
+                  for ((uid, u) in w) rows.getOrPut(pkgOf(pm, uid)) { LongArray(2) }[0] += u.total
+                  for ((uid, u) in m) rows.getOrPut(pkgOf(pm, uid)) { LongArray(2) }[1] += u.total
+                  rows[TOTAL] = longArrayOf(
+                      Core.device(c, ConnectivityManager.TYPE_WIFI, start, end),
+                      Core.device(c, ConnectivityManager.TYPE_MOBILE, start, end)
+                  )
+                  synchronized(this) {
+                      val d = db(c)
+                      // never lower a stored value (protects from transient query failures)
+                      val old = HashMap<String, LongArray>()
+                      d.rawQuery("SELECT pkg, wifi, mobile FROM daily WHERE day=?", arrayOf(start.toString())).use {
+                          while (it.moveToNext()) old[it.getString(0)] = longArrayOf(it.getLong(1), it.getLong(2))
+                      }
+                      d.beginTransaction()
+                      try {
+                          for ((k, v) in rows) {
+                              old[k]?.let { o -> v[0] = maxOf(v[0], o[0]); v[1] = maxOf(v[1], o[1]) }
+                              if (k != TOTAL && v[0] + v[1] == 0L) continue
+                              val cv = ContentValues()
+                              cv.put("day", start); cv.put("pkg", k); cv.put("wifi", v[0]); cv.put("mobile", v[1])
+                              d.insertWithOnConflict("daily", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+                          }
+                          d.setTransactionSuccessful()
+                      } finally { d.endTransaction() }
+                  }
+              }
+
+              /** Fast: today + yesterday only. Called before every read from the UI. */
+              fun syncRecent(c: Context) {
+                  val t = Core.dayStart()
+                  syncDay(c, Core.addDays(t, -1))
+                  syncDay(c, t)
+              }
+
+              /** Full / incremental sync (back-fills up to 90 days on first run). */
+              fun sync(c: Context) {
+                  if (!Core.hasUsageAccess(c)) return
+                  if (!running.compareAndSet(false, true)) return
+                  try {
+                      val p = Core.prefs(c)
+                      val today = Core.dayStart()
+                      val earliest = Core.addDays(today, -89)
+                      val last = p.getLong("hist_last", 0L)
+                      var d = if (last == 0L) earliest else maxOf(earliest, Core.nextDay(last))
+                      while (d <= today) {
+                          syncDay(c, d)
+                          if (d < today) p.edit().putLong("hist_last", d).apply()
+                          d = Core.nextDay(d)
+                      }
+                  } finally { running.set(false) }
+              }
+
+              fun resync(c: Context) {
+                  Core.prefs(c).edit().remove("hist_last").apply()
+                  sync(c)
+              }
+
+              // ---------------- reading ----------------
+              fun pkgTotals(c: Context, pkg: String, s: Long, e: Long): LongArray {
+                  val out = LongArray(2)
+                  db(c).rawQuery(
+                      "SELECT SUM(wifi), SUM(mobile) FROM daily WHERE pkg=? AND day>=? AND day<?",
+                      arrayOf(pkg, s.toString(), e.toString())
+                  ).use { if (it.moveToFirst()) { out[0] = it.getLong(0); out[1] = it.getLong(1) } }
+                  return out
+              }
+
+              fun totals(c: Context, s: Long, e: Long) = pkgTotals(c, TOTAL, s, e)
+
+              fun perPkg(c: Context, s: Long, e: Long): Map<String, LongArray> {
+                  val out = HashMap<String, LongArray>()
+                  db(c).rawQuery(
+                      "SELECT pkg, SUM(wifi), SUM(mobile) FROM daily WHERE day>=? AND day<? AND pkg<>? GROUP BY pkg",
+                      arrayOf(s.toString(), e.toString(), TOTAL)
+                  ).use { while (it.moveToNext()) out[it.getString(0)] = longArrayOf(it.getLong(1), it.getLong(2)) }
+                  return out
+              }
+
+              /** Daily rows folded into n equal buckets between s and e. */
+              fun series(c: Context, pkg: String, s: Long, e: Long, n: Int): Pair<List<Long>, List<Long>> {
+                  val w = LongArray(n); val m = LongArray(n)
+                  val span = (e - s).coerceAtLeast(1L)
+                  db(c).rawQuery(
+                      "SELECT day, wifi, mobile FROM daily WHERE pkg=? AND day>=? AND day<?",
+                      arrayOf(pkg, s.toString(), e.toString())
+                  ).use {
+                      while (it.moveToNext()) {
+                          val i = ((it.getLong(0) - s) * n / span).toInt().coerceIn(0, n - 1)
+                          w[i] += it.getLong(1); m[i] += it.getLong(2)
+                      }
+                  }
+                  return Pair(w.toList(), m.toList())
+              }
+
+              // ---------------- export ----------------
+              private fun q(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
+
+              fun exportCsv(c: Context, s: Long, e: Long): File {
+                  val dir = File(c.cacheDir, "exports").apply { mkdirs() }
+                  val f = File(dir, "dataly_usage.csv")
+                  val names = HashMap<String, String>()
+                  val df = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                  f.bufferedWriter(Charsets.UTF_8).use { w ->
+                      w.write("\uFEFF")
+                      w.write("date,app,package,wifi_bytes,mobile_bytes\n")
+                      db(c).rawQuery(
+                          "SELECT day, pkg, wifi, mobile FROM daily WHERE day>=? AND day<? ORDER BY day, pkg",
+                          arrayOf(s.toString(), e.toString())
+                      ).use {
+                          while (it.moveToNext()) {
+                              val pkg = it.getString(1)
+                              val name = when {
+                                  pkg == TOTAL -> "TOTAL"
+                                  pkg.startsWith("uid:") -> pkg
+                                  else -> names.getOrPut(pkg) { Core.appLabel(c, pkg) }
+                              }
+                              val pk = if (pkg == TOTAL) "" else pkg
+                              w.write("${df.format(Date(it.getLong(0)))},${q(name)},${q(pk)},${it.getLong(2)},${it.getLong(3)}\n")
+                          }
+                      }
+                  }
+                  return f
+              }
+          }
+
+          // ---------------------------------------------------------------- SpeedService
+          /** Live speed notification. While running it also checks limits every ~30 s. */
+          class SpeedService : Service() {
+              private val h = Handler(Looper.getMainLooper())
+              private var lastRx = -1L
+              private var lastTx = -1L
+              private var lastT = 0L
+              private var ticks = 0
+
+              private val loop = object : Runnable {
+                  override fun run() {
+                      tick()
+                      h.postDelayed(this, 1000)
+                  }
+              }
+
+              private fun spd(b: Double): String = when {
+                  b >= 1_048_576 -> String.format(Locale.US, "%.2f MB/s", b / 1_048_576)
+                  b >= 1024 -> String.format(Locale.US, "%.0f KB/s", b / 1024)
+                  else -> String.format(Locale.US, "%.0f B/s", b)
+              }
+
+              private fun build(down: Double, up: Double): Notification =
+                  NotificationCompat.Builder(this, Core.CH_SPEED)
+                      .setSmallIcon(R.drawable.ic_stat_speed)
+                      .setContentTitle("↓ ${spd(down)}    ↑ ${spd(up)}")
+                      .setOngoing(true)
+                      .setOnlyAlertOnce(true)
+                      .setPriority(NotificationCompat.PRIORITY_LOW)
+                      .setContentIntent(
+                          android.app.PendingIntent.getActivity(
+                              this, 0, Intent(this, MainActivity::class.java),
+                              android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                          )
+                      )
+                      .build()
+
+              private fun tick() {
+                  val rx = TrafficStats.getTotalRxBytes()
+                  val tx = TrafficStats.getTotalTxBytes()
+                  val t = SystemClock.elapsedRealtime()
+                  if (rx >= 0 && tx >= 0) {
+                      if (lastT > 0 && lastRx >= 0) {
+                          val dt = ((t - lastT) / 1000.0).coerceAtLeast(0.001)
+                          val d = (rx - lastRx).coerceAtLeast(0L) / dt
+                          val u = (tx - lastTx).coerceAtLeast(0L) / dt
+                          try {
+                              getSystemService(NotificationManager::class.java).notify(1, build(d, u))
+                          } catch (_: Exception) {}
+                      }
+                      lastRx = rx; lastTx = tx; lastT = t
+                  }
+                  if (++ticks % 30 == 0) {
+                      val ctx = applicationContext
+                      Thread { Core.checkLimits(ctx) }.start()
+                  }
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  Core.ensureChannels(this)
+                  val n = build(0.0, 0.0)
+                  if (Build.VERSION.SDK_INT >= 34)
+                      startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                  else
+                      startForeground(1, n)
+                  h.removeCallbacks(loop)
+                  lastT = 0L; lastRx = -1L; lastTx = -1L
+                  h.post(loop)
+                  return START_STICKY
+              }
+
+              override fun onDestroy() {
+                  h.removeCallbacks(loop)
+                  super.onDestroy()
+              }
+
+              override fun onBind(i: Intent?): IBinder? = null
+          }
+
+          // ---------------------------------------------------------------- MonitorReceiver
+          /** Periodic alarm tick + boot/update handler. */
+          class MonitorReceiver : BroadcastReceiver() {
+              companion object { const val TICK = "com.dataly.app.TICK" }
+
+              override fun onReceive(c: Context, i: Intent?) {
+                  val ctx = c.applicationContext
+                  when (i?.action) {
+                      Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                          Core.scheduleMonitor(ctx)
+                          if (Core.prefs(ctx).getBoolean("speed", false)) Core.setSpeed(ctx, true)
+                          work(ctx)
+                      }
+                      TICK -> work(ctx)
+                  }
+              }
+
+              private fun work(ctx: Context) {
+                  val p = goAsync()
+                  Thread {
+                      try {
+                          if (Core.hasUsageAccess(ctx)) {
+                              History.sync(ctx)
+                              Core.checkLimits(ctx)
+                              DatalyWidget.refresh(ctx)
+                          }
+                      } catch (_: Throwable) {
+                      } finally { p.finish() }
+                  }.start()
+              }
+          }
+
+          // ---------------------------------------------------------------- SpeedTile
+          /** Quick Settings tile that toggles the live-speed notification. */
+          class SpeedTile : TileService() {
+              override fun onStartListening() = refresh()
+
+              override fun onClick() {
+                  val on = !Core.prefs(this).getBoolean("speed", false)
+                  Core.setSpeed(this, on)
+                  refresh()
+              }
+
+              private fun refresh() {
+                  val t = qsTile ?: return
+                  t.state = if (Core.prefs(this).getBoolean("speed", false)) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+                  t.label = Core.str(this, "tile", "Live speed")
+                  t.updateTile()
+              }
+          }
+
+          // ---------------------------------------------------------------- DatalyWidget
+          /** Home-screen widget: today + current billing cycle, Wi-Fi vs mobile. */
+          class DatalyWidget : AppWidgetProvider() {
+              override fun onUpdate(c: Context, m: AppWidgetManager, ids: IntArray) {
+                  val ctx = c.applicationContext
+                  val p = goAsync()
+                  Thread {
+                      try {
+                          History.syncRecent(ctx)
+                          for (id in ids) m.updateAppWidget(id, build(ctx))
+                      } catch (_: Throwable) {
+                      } finally { p.finish() }
+                  }.start()
+              }
+
+              companion object {
+                  fun build(c: Context): RemoteViews {
+                      val v = RemoteViews(c.packageName, R.layout.widget_usage)
+                      val today = Core.dayStart()
+                      val t = History.totals(c, today, Core.nextDay(today))
+                      val cs = Core.cycleStart(c)
+                      val m = History.totals(c, cs, Core.cycleEnd(cs))
+                      val wifi = Core.str(c, "wifi", "Wi-Fi")
+                      val mob = Core.str(c, "mobile", "Mobile")
+                      v.setTextViewText(R.id.w_today_label, Core.str(c, "today", "Today"))
+                      v.setTextViewText(R.id.w_today_wifi, "$wifi  ${Core.fmt(t[0])}")
+                      v.setTextViewText(R.id.w_today_mob, "$mob  ${Core.fmt(t[1])}")
+                      v.setTextViewText(R.id.w_cycle_label, Core.str(c, "month", "Month"))
+                      v.setTextViewText(R.id.w_cycle_wifi, "$wifi  ${Core.fmt(m[0])}")
+                      v.setTextViewText(R.id.w_cycle_mob, "$mob  ${Core.fmt(m[1])}")
+                      val pi = PendingIntent.getActivity(
+                          c, 1, Intent(c, MainActivity::class.java),
+                          PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                      )
+                      v.setOnClickPendingIntent(R.id.w_root, pi)
+                      return v
+                  }
+
+                  fun refresh(c: Context) {
+                      try {
+                          val mgr = AppWidgetManager.getInstance(c)
+                          val ids = mgr.getAppWidgetIds(ComponentName(c, DatalyWidget::class.java))
+                          if (ids.isEmpty()) return
+                          val rv = build(c)
+                          for (id in ids) mgr.updateAppWidget(id, rv)
+                      } catch (_: Throwable) {}
+                  }
+              }
+          }
+
+          // ---------------------------------------------------------------- MainActivity
+          class MainActivity : FlutterActivity() {
+
+              /** Runs [f] on a worker thread; always answers the channel (success or error, never null-on-failure). */
+              private fun bg(res: MethodChannel.Result, f: () -> Any?) {
+                  Thread {
+                      var out: Any? = null
+                      var err: Exception? = null
+                      try { out = f() } catch (x: Exception) { err = x }
+                      val ex = err
+                      val r = out
+                      runOnUiThread {
+                          try {
+                              if (ex != null) res.error("native", ex.message, null) else res.success(r)
+                          } catch (_: Exception) {}
+                      }
+                  }.start()
+              }
+
+              private fun shareFile(f: File) {
+                  val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+                  val i = Intent(Intent.ACTION_SEND)
+                      .setType("text/csv")
+                      .putExtra(Intent.EXTRA_STREAM, uri)
+                      .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                  startActivity(Intent.createChooser(i, null))
+              }
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dataly/native")
+                      .setMethodCallHandler { call, res ->
+                          val ctx = applicationContext
+                          val s = call.argument<Number>("s")?.toLong() ?: 0L
+                          val e = call.argument<Number>("e")?.toLong() ?: 0L
+                          val n = call.argument<Int>("n") ?: 7
+
+                          when (call.method) {
+                              "hasAccess" -> res.success(Core.hasUsageAccess(ctx))
+
+                              "openAccess" -> {
+                                  try {
+                                      val i = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                                      if (Build.VERSION.SDK_INT >= 29) i.data = Uri.parse("package:$packageName")
+                                      startActivity(i)
+                                  } catch (_: ActivityNotFoundException) {
+                                      startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                  }
+                                  res.success(null)
+                              }
+
+                              "openAppData" -> {
+                                  val pkg = call.argument<String>("pkg") ?: ""
+                                  try { startActivity(Core.settingsIntent(this, pkg)) } catch (_: Exception) {}
+                                  res.success(null)
+                              }
+
+                              "state" -> {
+                                  val p = Core.prefs(ctx)
+                                  res.success(mapOf(
+                                      "limits" to (p.getString("limits", "{}") ?: "{}"),
+                                      "speed" to p.getBoolean("speed", false),
+                                      "lang" to (p.getString("lang", "") ?: ""),
+                                      "bill" to Core.billingDay(ctx),
+                                      "sdk" to Build.VERSION.SDK_INT
+                                  ))
+                              }
+
+                              "setLang" -> {
+                                  val ed = Core.prefs(ctx).edit()
+                                      .putString("lang", call.argument<String>("lang") ?: "en")
+                                  (call.argument<Map<String, Any?>>("strs") ?: emptyMap()).forEach { (k, v) ->
+                                      ed.putString("s_$k", v?.toString() ?: "")
+                                  }
+                                  ed.apply()
+                                  Core.ensureChannels(ctx)
+                                  DatalyWidget.refresh(ctx)
+                                  res.success(null)
+                              }
+
+                              "setBilling" -> {
+                                  Core.prefs(ctx).edit()
+                                      .putInt("bill", (call.argument<Int>("day") ?: 1).coerceIn(1, 28))
+                                      .remove("notified").apply()
+                                  DatalyWidget.refresh(ctx)
+                                  Thread { Core.checkLimits(ctx) }.start()
+                                  res.success(null)
+                              }
+
+                              "save" -> {
+                                  Core.prefs(ctx).edit()
+                                      .putString("limits", call.argument<String>("json") ?: "{}")
+                                      .remove("notified").apply()
+                                  Core.scheduleMonitor(ctx)
+                                  Thread { Core.checkLimits(ctx) }.start()
+                                  res.success(null)
+                              }
+
+                              "speed" -> {
+                                  Core.setSpeed(ctx, call.argument<Boolean>("on") ?: false)
+                                  res.success(null)
+                              }
+
+                              "startMonitor" -> {
+                                  Core.scheduleMonitor(ctx)
+                                  Thread { History.sync(ctx); Core.checkLimits(ctx); DatalyWidget.refresh(ctx) }.start()
+                                  res.success(null)
+                              }
+
+                              "resync" -> {
+                                  Thread { History.resync(ctx) }.start()
+                                  res.success(null)
+                              }
+
+                              "load" -> bg(res) {
+                                  val hourly = call.argument<Boolean>("hourly") ?: false
+                                  History.syncRecent(ctx)
+                                  val tot = History.totals(ctx, s, e)
+                                  val (sw, sm) = if (hourly) Core.hourly(ctx, s, e, n)
+                                                 else History.series(ctx, History.TOTAL, s, e, n)
+                                  val usage = History.perPkg(ctx, s, e).map { (k, v) ->
+                                      val isUid = k.startsWith("uid:")
+                                      mapOf(
+                                          "pkg" to k,
+                                          "uid" to (if (isUid) (k.substring(4).toIntOrNull() ?: 0) else 0),
+                                          "name" to (if (isUid) "" else Core.appLabel(ctx, k)),
+                                          "wifi" to v[0],
+                                          "mobile" to v[1]
+                                      )
+                                  }
+                                  mapOf("wifi" to tot[0], "mobile" to tot[1], "swifi" to sw, "smobile" to sm, "usage" to usage)
+                              }
+
+                              "detail" -> bg(res) {
+                                  val pkg = call.argument<String>("pkg") ?: ""
+                                  History.syncRecent(ctx)
+                                  val (w, m) = History.series(ctx, pkg, s, e, n)
+                                  val tot = History.pkgTotals(ctx, pkg, s, e)
+                                  val now = System.currentTimeMillis()
+                                  val uid = try { packageManager.getApplicationInfo(pkg, 0).uid } catch (_: Exception) { -1 }
+                                  val uw = Core.usageByUid(ctx, ConnectivityManager.TYPE_WIFI, s, now)[uid]
+                                  val um = Core.usageByUid(ctx, ConnectivityManager.TYPE_MOBILE, s, now)[uid]
+                                  val live = (uw?.total ?: 0L) + (um?.total ?: 0L)
+                                  val fg = (uw?.fg ?: 0L) + (um?.fg ?: 0L)
+                                  mapOf(
+                                      "wifi" to tot[0], "mobile" to tot[1],
+                                      "fg" to fg, "bg" to (live - fg).coerceAtLeast(0L),
+                                      "swifi" to w, "smobile" to m
+                                  )
+                              }
+
+                              "apps" -> bg(res) {
+                                  val pm = packageManager
+                                  val q = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                                  @Suppress("DEPRECATION")
+                                  val list = pm.queryIntentActivities(q, 0)
+                                  list.map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+                                      .filter { it.first != packageName }
+                                      .distinctBy { it.first }
+                                      .sortedBy { it.second.lowercase() }
+                                      .map { mapOf("pkg" to it.first, "name" to it.second) }
+                              }
+
+                              "limitStatus" -> bg(res) {
+                                  val l = Core.limits(ctx)
+                                  val now = System.currentTimeMillis()
+                                  val cache = HashMap<String, Map<Int, Core.Use>>()
+                                  val out = HashMap<String, Any>()
+                                  for (pkg in l.keys()) {
+                                      try {
+                                          val o = l.getJSONObject(pkg)
+                                          val per = o.optString("period", "month")
+                                          val uid = packageManager.getApplicationInfo(pkg, 0).uid
+                                          val st = Core.periodStart(ctx, per)
+                                          out[pkg] = mapOf(
+                                              "used" to Core.usedFor(ctx, o, uid, cache, now),
+                                              "start" to st,
+                                              "end" to Core.periodEnd(per, st)
+                                          )
+                                      } catch (_: Exception) {}
+                                  }
+                                  out
+                              }
+
+                              "export" -> bg(res) {
+                                  val f = History.exportCsv(ctx, s, e)
+                                  runOnUiThread { try { shareFile(f) } catch (_: Exception) {} }
+                                  true
+                              }
+
+                              else -> res.notImplemented()
+                          }
+                      }
+              }
+          }
+          EOF
+
+      - name: Write Flutter App (lib/main.dart)
+        run: |
+          cat << 'EOF' > app_build/lib/main.dart
+          // Dataly — data usage monitor. Single-file Flutter app (Dart).
+          // Native Android access is done through the small Kotlin bridge in MainActivity.kt.
+
+          import 'dart:async';
+          import 'dart:convert';
+          import 'package:flutter/foundation.dart';
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:flutter_localizations/flutter_localizations.dart';
+          import 'package:permission_handler/permission_handler.dart';
+
+          // ======================================================================
+          // l10n.dart
+          // ======================================================================
+          // Translations. All user-visible strings live here.
+          // `{name}` placeholders are replaced by tr(..., {'name': value}).
+
+          const langs = {
+            'ar': 'العربية',
+            'en': 'English',
+            'fr': 'Français',
+            'es': 'Español',
+            'tr': 'Türkçe',
+            'de': 'Deutsch',
+            'ru': 'Русский',
+            'id': 'Bahasa Indonesia',
+          };
+
+          const _tr = <String, Map<String, String>>{
+            'en': {
+              'perm': 'To read each app’s usage, Dataly needs “Usage access”.\nEnable Dataly on the next screen, then come back.',
+              'grant': 'Grant permission', 'today': 'Today', 'week': 'Week', 'month': 'Month', 'm3': '3 Months', 'year': 'Year',
+              'speed': 'Live speed in notification', 'wifi': 'Wi‑Fi', 'mobile': 'Mobile data',
+              'uw': 'Wi‑Fi usage', 'um': 'Mobile data usage', 'top': 'Top apps', 'tu': 'Usage', 'tc': 'Control',
+              'ct': 'App control', 'ch': 'Set a data limit for any app — you get an alert when it is reached.',
+              'search': 'Search apps', 'lt': 'Usage limit', 'lmb': 'Limit in MB', 'ms': 'Mobile', 'ws': 'Wi‑Fi', 'all': 'All',
+              'daily': 'Daily', 'monthly': 'Monthly', 'save': 'Save', 'remove': 'Remove', 'limit': 'Limit',
+              'removed': 'Removed apps', 'teth': 'Hotspot / Tethering', 'sys': 'System', 'lang': 'Language',
+              'chooselang': 'Choose your language', 'opensettings': 'App data settings',
+              'atitle': '{app} reached its data limit', 'abody': 'Tap to open its data settings and restrict it.',
+              'settings': 'Settings', 'bill': 'Billing cycle start day', 'billh': 'Used by the Month period and monthly limits.', 'export': 'Export usage (CSV)', 'exporth': 'Exports the selected period.', 'proj': 'Projected this cycle', 'fc': 'At this pace the limit is reached in {t}', 'fcok': 'On track to stay under the limit', 'ud': 'd', 'uh': 'h', 'used': 'Used', 'detail': 'App details', 'fg': 'Foreground', 'bg': 'Background', 'perday': 'Usage over time', 'wtitle': '{app} used {pct}% of its limit', 'wbody': '{used} of {limit} used. Tap to open its data settings.', 'ch_alerts': 'Limit alerts', 'ch_speed': 'Live speed', 'tile': 'Live speed', 'notif_off': 'Notifications are off — limit alerts won’t appear.', 'allow': 'Allow', 'phone_why': 'On Android 8–9, reading mobile data usage needs the Phone permission. Dataly never reads or makes calls.',
+              'fasthint': 'Limits are checked about every 15 min. Turn on live speed to check every 30 s.', 'err': 'Couldn’t load data', 'retry': 'Retry', 'badnum': 'Enter a number greater than 0',
+            },
+            'ar': {
+              'perm': 'لقراءة استهلاك كل تطبيق يحتاج Dataly صلاحية "الوصول إلى بيانات الاستخدام".\nفعّله من الشاشة التالية ثم ارجع للتطبيق.',
+              'grant': 'منح الصلاحية', 'today': 'اليوم', 'week': 'أسبوع', 'month': 'شهر', 'm3': '3 أشهر', 'year': 'سنة',
+              'speed': 'السرعة المباشرة بالإشعار', 'wifi': 'Wi‑Fi', 'mobile': 'بيانات الجوال',
+              'uw': 'استهلاك Wi‑Fi', 'um': 'استهلاك بيانات الجوال', 'top': 'التطبيقات الأكثر استهلاكاً', 'tu': 'الاستهلاك', 'tc': 'التحكم',
+              'ct': 'التحكم بالتطبيقات', 'ch': 'حدد حد استهلاك لأي تطبيق وسينبهك إشعار عند الوصول إليه.',
+              'search': 'بحث عن تطبيق', 'lt': 'حد الاستهلاك', 'lmb': 'الحد بالميجابايت (MB)', 'ms': 'جوال', 'ws': 'Wi‑Fi', 'all': 'الكل',
+              'daily': 'يومي', 'monthly': 'شهري', 'save': 'حفظ', 'remove': 'إزالة', 'limit': 'حد',
+              'removed': 'تطبيقات محذوفة', 'teth': 'المشاركة (Hotspot)', 'sys': 'النظام', 'lang': 'اللغة',
+              'chooselang': 'اختر لغتك', 'opensettings': 'إعدادات بيانات التطبيق',
+              'atitle': 'وصل {app} إلى حد الاستهلاك', 'abody': 'اضغط لفتح إعدادات بياناته وتقييده.',
+              'settings': 'الإعدادات', 'bill': 'يوم بداية دورة الفاتورة', 'billh': 'تستخدمه فترة "شهر" والحدود الشهرية.', 'export': 'تصدير الاستهلاك (CSV)', 'exporth': 'يصدّر الفترة المحددة.', 'proj': 'المتوقع لهذه الدورة', 'fc': 'بهذا المعدل سيصل الحد خلال {t}', 'fcok': 'ضمن الحد بهذا المعدل', 'ud': 'يوم', 'uh': 'ساعة', 'used': 'المستهلك', 'detail': 'تفاصيل التطبيق', 'fg': 'أثناء الاستخدام', 'bg': 'في الخلفية', 'perday': 'الاستهلاك عبر الزمن', 'wtitle': '{app} استهلك {pct}% من حده', 'wbody': 'استُهلك {used} من {limit}. اضغط لفتح إعدادات البيانات.', 'ch_alerts': 'تنبيهات الحد', 'ch_speed': 'السرعة المباشرة', 'tile': 'السرعة المباشرة', 'notif_off': 'الإشعارات متوقفة — لن تظهر تنبيهات الحد.', 'allow': 'سماح', 'phone_why': 'في أندرويد 8–9 تتطلب قراءة بيانات الجوال صلاحية الهاتف. لا يقرأ Dataly المكالمات ولا يجريها.',
+              'fasthint': 'تُفحص الحدود كل 15 دقيقة تقريباً. فعّل السرعة المباشرة للفحص كل 30 ثانية.', 'err': 'تعذّر تحميل البيانات', 'retry': 'إعادة المحاولة', 'badnum': 'أدخل رقماً أكبر من 0',
+            },
+            'fr': {
+              'perm': 'Pour lire la consommation de chaque appli, Dataly a besoin de l’accès aux données d’utilisation.\nActivez Dataly sur l’écran suivant puis revenez.',
+              'grant': 'Autoriser', 'today': 'Aujourd’hui', 'week': 'Semaine', 'month': 'Mois', 'm3': '3 mois', 'year': 'Année',
+              'speed': 'Vitesse en direct (notification)', 'wifi': 'Wi‑Fi', 'mobile': 'Données mobiles',
+              'uw': 'Conso Wi‑Fi', 'um': 'Conso données mobiles', 'top': 'Applis les plus gourmandes', 'tu': 'Conso', 'tc': 'Contrôle',
+              'ct': 'Contrôle des applis', 'ch': 'Définissez une limite pour une appli : une alerte s’affiche à son atteinte.',
+              'search': 'Rechercher une appli', 'lt': 'Limite de conso', 'lmb': 'Limite en Mo', 'ms': 'Mobile', 'ws': 'Wi‑Fi', 'all': 'Tout',
+              'daily': 'Par jour', 'monthly': 'Par mois', 'save': 'Enregistrer', 'remove': 'Supprimer', 'limit': 'Limite',
+              'removed': 'Applis supprimées', 'teth': 'Point d’accès / Partage', 'sys': 'Système', 'lang': 'Langue',
+              'chooselang': 'Choisissez votre langue', 'opensettings': 'Paramètres de données de l’appli',
+              'atitle': '{app} a atteint sa limite', 'abody': 'Touchez pour ouvrir ses paramètres de données et la restreindre.',
+              'settings': 'Réglages', 'bill': 'Jour de début du cycle de facturation', 'billh': 'Utilisé par la période « Mois » et les limites mensuelles.', 'export': 'Exporter la conso (CSV)', 'exporth': 'Exporte la période sélectionnée.', 'proj': 'Prévision pour ce cycle', 'fc': 'À ce rythme, la limite sera atteinte dans {t}', 'fcok': 'Vous resterez sous la limite', 'ud': 'j', 'uh': 'h', 'used': 'Consommé', 'detail': 'Détails de l’appli', 'fg': 'Premier plan', 'bg': 'Arrière-plan', 'perday': 'Conso dans le temps', 'wtitle': '{app} a utilisé {pct} % de sa limite', 'wbody': '{used} sur {limit} utilisés. Touchez pour ouvrir ses paramètres de données.', 'ch_alerts': 'Alertes de limite', 'ch_speed': 'Vitesse en direct', 'tile': 'Vitesse en direct', 'notif_off': 'Notifications désactivées : les alertes n’apparaîtront pas.', 'allow': 'Autoriser', 'phone_why': 'Sur Android 8–9, lire la conso mobile nécessite l’autorisation Téléphone. Dataly ne lit ni ne passe jamais d’appels.',
+              'fasthint': 'Les limites sont vérifiées toutes les ~15 min. Activez la vitesse en direct pour vérifier toutes les 30 s.', 'err': 'Impossible de charger les données', 'retry': 'Réessayer', 'badnum': 'Saisissez un nombre supérieur à 0',
+            },
+            'es': {
+              'perm': 'Para leer el consumo de cada app, Dataly necesita “Acceso al uso”.\nActívalo en la siguiente pantalla y vuelve.',
+              'grant': 'Conceder permiso', 'today': 'Hoy', 'week': 'Semana', 'month': 'Mes', 'm3': '3 meses', 'year': 'Año',
+              'speed': 'Velocidad en vivo (notificación)', 'wifi': 'Wi‑Fi', 'mobile': 'Datos móviles',
+              'uw': 'Consumo Wi‑Fi', 'um': 'Consumo de datos móviles', 'top': 'Apps con más consumo', 'tu': 'Consumo', 'tc': 'Control',
+              'ct': 'Control de apps', 'ch': 'Define un límite para cualquier app y recibirás una alerta al alcanzarlo.',
+              'search': 'Buscar app', 'lt': 'Límite de consumo', 'lmb': 'Límite en MB', 'ms': 'Móvil', 'ws': 'Wi‑Fi', 'all': 'Todo',
+              'daily': 'Diario', 'monthly': 'Mensual', 'save': 'Guardar', 'remove': 'Quitar', 'limit': 'Límite',
+              'removed': 'Apps eliminadas', 'teth': 'Punto de acceso', 'sys': 'Sistema', 'lang': 'Idioma',
+              'chooselang': 'Elige tu idioma', 'opensettings': 'Ajustes de datos de la app',
+              'atitle': '{app} alcanzó su límite', 'abody': 'Toca para abrir sus ajustes de datos y restringirla.',
+              'settings': 'Ajustes', 'bill': 'Día de inicio del ciclo de facturación', 'billh': 'Lo usan el periodo «Mes» y los límites mensuales.', 'export': 'Exportar consumo (CSV)', 'exporth': 'Exporta el periodo seleccionado.', 'proj': 'Previsto este ciclo', 'fc': 'A este ritmo se alcanzará el límite en {t}', 'fcok': 'No superarás el límite a este ritmo', 'ud': 'd', 'uh': 'h', 'used': 'Usado', 'detail': 'Detalles de la app', 'fg': 'Primer plano', 'bg': 'Segundo plano', 'perday': 'Consumo en el tiempo', 'wtitle': '{app} usó el {pct}% de su límite', 'wbody': '{used} de {limit} usados. Toca para abrir sus ajustes de datos.', 'ch_alerts': 'Alertas de límite', 'ch_speed': 'Velocidad en vivo', 'tile': 'Velocidad en vivo', 'notif_off': 'Notificaciones desactivadas: no verás las alertas de límite.', 'allow': 'Permitir', 'phone_why': 'En Android 8–9, leer el consumo de datos móviles requiere el permiso de Teléfono. Dataly nunca lee ni hace llamadas.',
+              'fasthint': 'Los límites se revisan cada ~15 min. Activa la velocidad en vivo para revisarlos cada 30 s.', 'err': 'No se pudieron cargar los datos', 'retry': 'Reintentar', 'badnum': 'Introduce un número mayor que 0',
+            },
+            'tr': {
+              'perm': 'Her uygulamanın kullanımını okumak için Dataly’nin “Kullanım erişimi” iznine ihtiyacı var.\nBir sonraki ekranda etkinleştirip geri dönün.',
+              'grant': 'İzin ver', 'today': 'Bugün', 'week': 'Hafta', 'month': 'Ay', 'm3': '3 Ay', 'year': 'Yıl',
+              'speed': 'Bildirimde canlı hız', 'wifi': 'Wi‑Fi', 'mobile': 'Mobil veri',
+              'uw': 'Wi‑Fi kullanımı', 'um': 'Mobil veri kullanımı', 'top': 'En çok kullanan uygulamalar', 'tu': 'Kullanım', 'tc': 'Kontrol',
+              'ct': 'Uygulama kontrolü', 'ch': 'Herhangi bir uygulama için limit belirleyin; limite ulaşınca uyarı alırsınız.',
+              'search': 'Uygulama ara', 'lt': 'Kullanım limiti', 'lmb': 'MB cinsinden limit', 'ms': 'Mobil', 'ws': 'Wi‑Fi', 'all': 'Hepsi',
+              'daily': 'Günlük', 'monthly': 'Aylık', 'save': 'Kaydet', 'remove': 'Kaldır', 'limit': 'Limit',
+              'removed': 'Kaldırılan uygulamalar', 'teth': 'Hotspot / Paylaşım', 'sys': 'Sistem', 'lang': 'Dil',
+              'chooselang': 'Dilinizi seçin', 'opensettings': 'Uygulama veri ayarları',
+              'atitle': '{app} limitine ulaştı', 'abody': 'Veri ayarlarını açıp kısıtlamak için dokunun.',
+              'settings': 'Ayarlar', 'bill': 'Fatura dönemi başlangıç günü', 'billh': '“Ay” dönemi ve aylık limitler tarafından kullanılır.', 'export': 'Kullanımı dışa aktar (CSV)', 'exporth': 'Seçili dönemi dışa aktarır.', 'proj': 'Bu dönem için tahmin', 'fc': 'Bu hızla limite {t} içinde ulaşılır', 'fcok': 'Limitin altında kalacaksınız', 'ud': 'g', 'uh': 'sa', 'used': 'Kullanılan', 'detail': 'Uygulama ayrıntıları', 'fg': 'Ön plan', 'bg': 'Arka plan', 'perday': 'Zamana göre kullanım', 'wtitle': '{app} limitinin %{pct} kadarını kullandı', 'wbody': '{limit} limitin {used} kadarı kullanıldı. Veri ayarlarını açmak için dokunun.', 'ch_alerts': 'Limit uyarıları', 'ch_speed': 'Canlı hız', 'tile': 'Canlı hız', 'notif_off': 'Bildirimler kapalı — limit uyarıları görünmez.', 'allow': 'İzin ver', 'phone_why': 'Android 8–9’da mobil veri kullanımını okumak için Telefon izni gerekir. Dataly aramaları asla okumaz veya yapmaz.',
+              'fasthint': 'Limitler yaklaşık 15 dakikada bir kontrol edilir. 30 sn’de bir kontrol için canlı hızı açın.', 'err': 'Veriler yüklenemedi', 'retry': 'Tekrar dene', 'badnum': '0’dan büyük bir sayı girin',
+            },
+            'de': {
+              'perm': 'Um den Verbrauch jeder App zu lesen, braucht Dataly den „Nutzungszugriff“.\nAktiviere Dataly im nächsten Bildschirm und kehre zurück.',
+              'grant': 'Berechtigung erteilen', 'today': 'Heute', 'week': 'Woche', 'month': 'Monat', 'm3': '3 Monate', 'year': 'Jahr',
+              'speed': 'Live-Geschwindigkeit in Benachrichtigung', 'wifi': 'WLAN', 'mobile': 'Mobile Daten',
+              'uw': 'WLAN-Verbrauch', 'um': 'Verbrauch mobiler Daten', 'top': 'Apps mit höchstem Verbrauch', 'tu': 'Verbrauch', 'tc': 'Kontrolle',
+              'ct': 'App-Kontrolle', 'ch': 'Lege ein Limit für eine App fest – bei Erreichen erhältst du eine Warnung.',
+              'search': 'App suchen', 'lt': 'Verbrauchslimit', 'lmb': 'Limit in MB', 'ms': 'Mobil', 'ws': 'WLAN', 'all': 'Alle',
+              'daily': 'Täglich', 'monthly': 'Monatlich', 'save': 'Speichern', 'remove': 'Entfernen', 'limit': 'Limit',
+              'removed': 'Gelöschte Apps', 'teth': 'Hotspot / Tethering', 'sys': 'System', 'lang': 'Sprache',
+              'chooselang': 'Sprache wählen', 'opensettings': 'Dateneinstellungen der App',
+              'atitle': '{app} hat sein Limit erreicht', 'abody': 'Tippe, um die Dateneinstellungen zu öffnen und einzuschränken.',
+              'settings': 'Einstellungen', 'bill': 'Starttag des Abrechnungszeitraums', 'billh': 'Wird für den Zeitraum „Monat“ und Monatslimits verwendet.', 'export': 'Verbrauch exportieren (CSV)', 'exporth': 'Exportiert den gewählten Zeitraum.', 'proj': 'Prognose für diesen Zeitraum', 'fc': 'In diesem Tempo wird das Limit in {t} erreicht', 'fcok': 'Das Limit wird voraussichtlich nicht erreicht', 'ud': 'T', 'uh': 'Std', 'used': 'Verbraucht', 'detail': 'App-Details', 'fg': 'Vordergrund', 'bg': 'Hintergrund', 'perday': 'Verbrauch im Zeitverlauf', 'wtitle': '{app} hat {pct} % seines Limits verbraucht', 'wbody': '{used} von {limit} verbraucht. Tippe, um die Dateneinstellungen zu öffnen.', 'ch_alerts': 'Limit-Warnungen', 'ch_speed': 'Live-Geschwindigkeit', 'tile': 'Live-Geschwindigkeit', 'notif_off': 'Benachrichtigungen sind aus – Limit-Warnungen erscheinen nicht.', 'allow': 'Erlauben', 'phone_why': 'Unter Android 8–9 erfordert das Lesen der mobilen Daten die Telefon-Berechtigung. Dataly liest oder führt nie Anrufe aus.',
+              'fasthint': 'Limits werden etwa alle 15 Min. geprüft. Aktiviere die Live-Geschwindigkeit für eine Prüfung alle 30 s.', 'err': 'Daten konnten nicht geladen werden', 'retry': 'Erneut versuchen', 'badnum': 'Gib eine Zahl größer als 0 ein',
+            },
+            'ru': {
+              'perm': 'Чтобы читать расход каждого приложения, Dataly нужен «Доступ к данным об использовании».\nВключите Dataly на следующем экране и вернитесь.',
+              'grant': 'Дать доступ', 'today': 'Сегодня', 'week': 'Неделя', 'month': 'Месяц', 'm3': '3 месяца', 'year': 'Год',
+              'speed': 'Скорость в уведомлении', 'wifi': 'Wi‑Fi', 'mobile': 'Мобильные данные',
+              'uw': 'Расход Wi‑Fi', 'um': 'Расход мобильных данных', 'top': 'Самые активные приложения', 'tu': 'Расход', 'tc': 'Контроль',
+              'ct': 'Контроль приложений', 'ch': 'Задайте лимит для приложения — при его достижении придёт оповещение.',
+              'search': 'Поиск приложения', 'lt': 'Лимит расхода', 'lmb': 'Лимит в МБ', 'ms': 'Мобильн.', 'ws': 'Wi‑Fi', 'all': 'Все',
+              'daily': 'В день', 'monthly': 'В месяц', 'save': 'Сохранить', 'remove': 'Удалить', 'limit': 'Лимит',
+              'removed': 'Удалённые приложения', 'teth': 'Точка доступа', 'sys': 'Система', 'lang': 'Язык',
+              'chooselang': 'Выберите язык', 'opensettings': 'Настройки данных приложения',
+              'atitle': '{app} достиг лимита', 'abody': 'Нажмите, чтобы открыть настройки данных и ограничить.',
+              'settings': 'Настройки', 'bill': 'День начала расчётного периода', 'billh': 'Используется для периода «Месяц» и месячных лимитов.', 'export': 'Экспорт расхода (CSV)', 'exporth': 'Экспортирует выбранный период.', 'proj': 'Прогноз на этот период', 'fc': 'С такой скоростью лимит будет достигнут через {t}', 'fcok': 'Лимит не будет превышен', 'ud': 'д', 'uh': 'ч', 'used': 'Использовано', 'detail': 'Сведения о приложении', 'fg': 'Активный режим', 'bg': 'Фон', 'perday': 'Расход по времени', 'wtitle': '{app} использовал {pct}% лимита', 'wbody': 'Использовано {used} из {limit}. Нажмите, чтобы открыть настройки данных.', 'ch_alerts': 'Оповещения о лимите', 'ch_speed': 'Скорость в реальном времени', 'tile': 'Скорость в реальном времени', 'notif_off': 'Уведомления выключены — оповещения о лимите не появятся.', 'allow': 'Разрешить', 'phone_why': 'На Android 8–9 для чтения мобильного трафика нужно разрешение «Телефон». Dataly никогда не читает и не совершает звонки.',
+              'fasthint': 'Лимиты проверяются примерно раз в 15 мин. Включите скорость в уведомлении для проверки каждые 30 с.', 'err': 'Не удалось загрузить данные', 'retry': 'Повторить', 'badnum': 'Введите число больше 0',
+            },
+            'id': {
+              'perm': 'Untuk membaca pemakaian tiap aplikasi, Dataly memerlukan “Akses penggunaan”.\nAktifkan Dataly di layar berikutnya lalu kembali.',
+              'grant': 'Berikan izin', 'today': 'Hari ini', 'week': 'Minggu', 'month': 'Bulan', 'm3': '3 Bulan', 'year': 'Tahun',
+              'speed': 'Kecepatan langsung di notifikasi', 'wifi': 'Wi‑Fi', 'mobile': 'Data seluler',
+              'uw': 'Pemakaian Wi‑Fi', 'um': 'Pemakaian data seluler', 'top': 'Aplikasi terboros', 'tu': 'Pemakaian', 'tc': 'Kontrol',
+              'ct': 'Kontrol aplikasi', 'ch': 'Atur batas untuk aplikasi mana pun — Anda dapat peringatan saat tercapai.',
+              'search': 'Cari aplikasi', 'lt': 'Batas pemakaian', 'lmb': 'Batas dalam MB', 'ms': 'Seluler', 'ws': 'Wi‑Fi', 'all': 'Semua',
+              'daily': 'Harian', 'monthly': 'Bulanan', 'save': 'Simpan', 'remove': 'Hapus', 'limit': 'Batas',
+              'removed': 'Aplikasi terhapus', 'teth': 'Hotspot / Tethering', 'sys': 'Sistem', 'lang': 'Bahasa',
+              'chooselang': 'Pilih bahasa Anda', 'opensettings': 'Pengaturan data aplikasi',
+              'atitle': '{app} mencapai batasnya', 'abody': 'Ketuk untuk membuka pengaturan datanya dan membatasi.',
+              'settings': 'Pengaturan', 'bill': 'Hari mulai siklus tagihan', 'billh': 'Dipakai oleh periode “Bulan” dan batas bulanan.', 'export': 'Ekspor pemakaian (CSV)', 'exporth': 'Mengekspor periode yang dipilih.', 'proj': 'Perkiraan siklus ini', 'fc': 'Dengan laju ini batas tercapai dalam {t}', 'fcok': 'Diperkirakan tetap di bawah batas', 'ud': 'hr', 'uh': 'j', 'used': 'Terpakai', 'detail': 'Detail aplikasi', 'fg': 'Latar depan', 'bg': 'Latar belakang', 'perday': 'Pemakaian dari waktu ke waktu', 'wtitle': '{app} memakai {pct}% batasnya', 'wbody': '{used} dari {limit} terpakai. Ketuk untuk membuka pengaturan datanya.', 'ch_alerts': 'Peringatan batas', 'ch_speed': 'Kecepatan langsung', 'tile': 'Kecepatan langsung', 'notif_off': 'Notifikasi mati — peringatan batas tidak akan muncul.', 'allow': 'Izinkan', 'phone_why': 'Di Android 8–9, membaca data seluler memerlukan izin Telepon. Dataly tidak pernah membaca atau melakukan panggilan.',
+              'fasthint': 'Batas diperiksa sekitar tiap 15 menit. Aktifkan kecepatan langsung untuk pemeriksaan tiap 30 dtk.', 'err': 'Gagal memuat data', 'retry': 'Coba lagi', 'badnum': 'Masukkan angka lebih dari 0',
+            },
+          };
+
+          /// Keys pushed to the native side (notifications, widget, Quick Settings tile).
+          const nativeKeys = [
+            'atitle', 'abody', 'wtitle', 'wbody', 'ch_alerts', 'ch_speed', 'tile', 'today', 'month', 'wifi', 'mobile',
+          ];
+
+          String tr(String lang, String k, [Map<String, String>? args]) {
+            var s = (_tr[lang] ?? _tr['en']!)[k] ?? _tr['en']![k] ?? k;
+            if (args != null) {
+              args.forEach((a, b) => s = s.replaceAll('{$a}', b));
+            }
+            return s;
+          }
+
+          // ======================================================================
+          // models.dart
+          // ======================================================================
+          /// Plain data classes and period maths shared by the UI.
+
+          class AppUse {
+            final String pkg, name;
+            final int uid;
+            final num wifi, mobile;
+            const AppUse(this.pkg, this.name, this.uid, this.wifi, this.mobile);
+
+            factory AppUse.fromMap(Map m) => AppUse(
+                  (m['pkg'] as String?) ?? '',
+                  (m['name'] as String?) ?? '',
+                  (m['uid'] as num?)?.toInt() ?? 0,
+                  (m['wifi'] as num?) ?? 0,
+                  (m['mobile'] as num?) ?? 0,
+                );
+
+            /// net: 0 = Wi-Fi, 1 = mobile
+            num byNet(int net) => net == 0 ? wifi : mobile;
+            bool get isRealApp => pkg.isNotEmpty && !pkg.startsWith('uid:');
+          }
+
+          class AppInfo {
+            final String pkg, name;
+            const AppInfo(this.pkg, this.name);
+          }
+
+          class LimitStatus {
+            final num used, start, end;
+            const LimitStatus(this.used, this.start, this.end);
+            factory LimitStatus.fromMap(Map m) => LimitStatus(
+                  (m['used'] as num?) ?? 0,
+                  (m['start'] as num?) ?? 0,
+                  (m['end'] as num?) ?? 0,
+                );
+          }
+
+          class AppDetail {
+            final num wifi, mobile, fg, bg;
+            final List<num> sWifi, sMobile;
+            const AppDetail(this.wifi, this.mobile, this.fg, this.bg, this.sWifi, this.sMobile);
+
+            static List<num> _list(Object? o) => ((o as List?) ?? const []).map((x) => x as num).toList();
+
+            factory AppDetail.fromMap(Map m) => AppDetail(
+                  (m['wifi'] as num?) ?? 0,
+                  (m['mobile'] as num?) ?? 0,
+                  (m['fg'] as num?) ?? 0,
+                  (m['bg'] as num?) ?? 0,
+                  _list(m['swifi']),
+                  _list(m['smobile']),
+                );
+          }
+
+          // ---------------------------------------------------------------- periods
+
+          const periodKeys = ['today', 'week', 'month', 'm3', 'year'];
+
+          /// A day-aligned time range in epoch milliseconds, split into [n] chart buckets.
+          class Range {
+            final int s, e, n;
+            const Range(this.s, this.e, this.n);
+          }
+
+          /// Start of the billing cycle that contains [now]. [day] is 1..28.
+          DateTime cycleStart(DateTime now, int day) =>
+              DateTime(now.year, now.day < day ? now.month - 1 : now.month, day);
+
+          /// Period index: 0 today, 1 week (7 days), 2 current billing cycle, 3 = 90 days, 4 = 365 days.
+          Range rangeFor(int pi, int billing) {
+            final now = DateTime.now();
+            int ms(DateTime d) => d.millisecondsSinceEpoch;
+            final tomorrow = ms(DateTime(now.year, now.month, now.day + 1));
+            switch (pi) {
+              case 0:
+                return Range(ms(DateTime(now.year, now.month, now.day)), tomorrow, 24);
+              case 1:
+                return Range(ms(DateTime(now.year, now.month, now.day - 6)), tomorrow, 7);
+              case 2:
+                {
+                  final st = cycleStart(now, billing);
+                  final en = DateTime(st.year, st.month + 1, st.day);
+                  final days = ((ms(en) - ms(st)) / 86400000).round();
+                  return Range(ms(st), ms(en), days < 1 ? 1 : days);
+                }
+              case 3:
+                return Range(ms(DateTime(now.year, now.month, now.day - 89)), tomorrow, 13);
+              default:
+                return Range(ms(DateTime(now.year, now.month, now.day - 364)), tomorrow, 12);
+            }
+          }
+
+          /// Linear projection of [used] to the end of range [r]; null while there is too little data.
+          num? projectCycle(num used, Range r) {
+            final el = DateTime.now().millisecondsSinceEpoch - r.s;
+            if (el < 12 * 3600 * 1000 || used <= 0) return null;
+            return used * (r.e - r.s) / el;
+          }
+
+          // ======================================================================
+          // native.dart
+          // ======================================================================
+          /// Thin wrapper over the native MethodChannel. Every call may throw PlatformException.
+          class Native {
+            static const _ch = MethodChannel('dataly/native');
+
+            static Map<String, dynamic> _m(Object? o) =>
+                o == null ? <String, dynamic>{} : Map<String, dynamic>.from(o as Map);
+
+            static Future<Map<String, dynamic>> state() async => _m(await _ch.invokeMethod('state'));
+            static Future<bool> hasAccess() async => (await _ch.invokeMethod<bool>('hasAccess')) ?? false;
+            static Future<void> openAccess() async => _ch.invokeMethod('openAccess');
+            static Future<void> openAppData(String pkg) async => _ch.invokeMethod('openAppData', {'pkg': pkg});
+            static Future<void> setLang(String lang, Map<String, String> strs) async =>
+                _ch.invokeMethod('setLang', {'lang': lang, 'strs': strs});
+            static Future<void> setBilling(int day) async => _ch.invokeMethod('setBilling', {'day': day});
+            static Future<void> saveLimits(String json) async => _ch.invokeMethod('save', {'json': json});
+            static Future<void> setSpeed(bool on) async => _ch.invokeMethod('speed', {'on': on});
+            static Future<void> startMonitor() async => _ch.invokeMethod('startMonitor');
+            static Future<void> resync() async => _ch.invokeMethod('resync');
+
+            static Future<Map<String, dynamic>> load(int s, int e, int n, bool hourly) async =>
+                _m(await _ch.invokeMethod('load', {'s': s, 'e': e, 'n': n, 'hourly': hourly}));
+
+            static Future<Map<String, dynamic>> detail(String pkg, int s, int e, int n) async =>
+                _m(await _ch.invokeMethod('detail', {'pkg': pkg, 's': s, 'e': e, 'n': n}));
+
+            static Future<List<Map<String, dynamic>>> apps() async {
+              final l = await _ch.invokeMethod<List>('apps') ?? const [];
+              return l.map((x) => Map<String, dynamic>.from(x as Map)).toList();
+            }
+
+            static Future<Map<String, dynamic>> limitStatus() async => _m(await _ch.invokeMethod('limitStatus'));
+
+            static Future<void> exportCsv(int s, int e) async => _ch.invokeMethod('export', {'s': s, 'e': e});
+          }
+
+          // ======================================================================
+          // ui.dart
+          // ======================================================================
+          const kBg = Color(0xFF0A0E1A);
+          const kCard = Color(0xFF141A2B);
+          const kWifi = Color(0xFF5B8CFF);
+          const kMob = Color(0xFF2EE6A6);
+          const kWarn = Color(0xFFFFB454);
+
+          String fmt(num b) {
+            if (b < 1024) return '${b.toInt()} B';
+            const u = ['KB', 'MB', 'GB', 'TB'];
+            double v = b / 1024;
+            int i = 0;
+            while (v >= 1024 && i < 3) {
+              v /= 1024;
+              i++;
+            }
+            return '${v.toStringAsFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${u[i]}';
+          }
+
+          Widget avatar(String name, {double size = 40}) {
+            final ch = name.isEmpty ? '?' : name.characters.first.toUpperCase();
+            final hue = (name.hashCode % 360).toDouble();
+            final c = HSLColor.fromAHSL(1, hue, .55, .5).toColor();
+            return Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.withValues(alpha: .25),
+                borderRadius: BorderRadius.circular(size / 3),
+              ),
+              child: Text(ch, style: TextStyle(color: c, fontWeight: FontWeight.bold, fontSize: size * .42)),
+            );
+          }
+
+          BoxDecoration cardBox({Color color = kCard}) =>
+              BoxDecoration(color: color, borderRadius: BorderRadius.circular(18));
+
+          class InfoBanner extends StatelessWidget {
+            final IconData icon;
+            final String text;
+            final String? action;
+            final VoidCallback? onAction;
+            final Color color;
+            const InfoBanner({
+              super.key,
+              required this.icon,
+              required this.text,
+              this.action,
+              this.onAction,
+              this.color = kWarn,
+            });
+
+            @override
+            Widget build(BuildContext context) => Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: color.withValues(alpha: .4)),
+                  ),
+                  child: Row(children: [
+                    Icon(icon, color: color, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(text, style: const TextStyle(fontSize: 12.5, height: 1.35))),
+                    if (action != null) TextButton(onPressed: onAction, child: Text(action!)),
+                  ]),
+                );
+          }
+
+          class BarChart extends StatelessWidget {
+            final List<num> values;
+            final Color color;
+            const BarChart({super.key, required this.values, required this.color});
+
+            @override
+            Widget build(BuildContext context) {
+              final mx = values.fold<num>(1, (a, b) => b > a ? b : a);
+              return SizedBox(
+                height: 110,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (final x in values)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                          child: Container(
+                            height: 4 + 106 * (x / mx),
+                            decoration: BoxDecoration(
+                              color: x > 0 ? color : color.withValues(alpha: .25),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }
+          }
+
+          class NetCard extends StatelessWidget {
+            final String label;
+            final num value;
+            final Color color;
+            final bool selected;
+            final VoidCallback onTap;
+            const NetCard({
+              super.key,
+              required this.label,
+              required this.value,
+              required this.color,
+              required this.selected,
+              required this.onTap,
+            });
+
+            @override
+            Widget build(BuildContext context) => Expanded(
+                  child: GestureDetector(
+                    onTap: onTap,
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: selected ? color.withValues(alpha: .15) : kCard,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: selected ? color : Colors.transparent, width: 1.4),
+                      ),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 4),
+                        Text(fmt(value), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      ]),
+                    ),
+                  ),
+                );
+          }
+
+          // ======================================================================
+          // state.dart
+          // ======================================================================
+          /// Single source of truth for the UI (no extra packages needed).
+          class AppState extends ChangeNotifier {
+            bool? access; // null = still checking
+            bool ready = false;
+            String lang = '';
+            int sdk = 0, billing = 1;
+            int pi = 1, net = 0;
+            bool speed = false, loading = false, notifOk = true, needPhone = false;
+            String? error;
+
+            num wifiTotal = 0, mobTotal = 0;
+            List<num> wifiSeries = [], mobSeries = [];
+            List<AppUse> usage = [];
+            List<AppInfo> allApps = [];
+            Map<String, dynamic> limits = {};
+            Map<String, LimitStatus> status = {};
+
+            int _req = 0;
+
+            String t(String k, [Map<String, String>? a]) => tr(lang, k, a);
+
+            // ------------------------------------------------------------ startup
+            Future<void> init() async {
+              try {
+                final st = await Native.state();
+                limits = Map<String, dynamic>.from(jsonDecode((st['limits'] as String?) ?? '{}') as Map);
+                speed = st['speed'] == true;
+                lang = (st['lang'] as String?) ?? '';
+                sdk = (st['sdk'] as num?)?.toInt() ?? 0;
+                billing = (st['bill'] as num?)?.toInt() ?? 1;
+                ready = true;
+                access = await Native.hasAccess();
+              } catch (_) {
+                access ??= false;
+              }
+              notifyListeners();
+              if (access == true && lang.isNotEmpty) await _afterAccess();
+            }
+
+            Future<void> _afterAccess() async {
+              unawaited(Native.startMonitor().catchError((_) {}));
+              await _checkPerms();
+              unawaited(load());
+              unawaited(loadStatus());
+              if (allApps.isEmpty) {
+                try {
+                  allApps = (await Native.apps()).map((m) => AppInfo(m['pkg'] as String, m['name'] as String)).toList();
+                  notifyListeners();
+                } catch (_) {}
+              }
+            }
+
+            Future<void> _checkPerms() async {
+              try {
+                notifOk = await Permission.notification.isGranted;
+              } catch (_) {}
+              if (sdk > 0 && sdk < 29) {
+                try {
+                  needPhone = !(await Permission.phone.isGranted);
+                } catch (_) {}
+              }
+              notifyListeners();
+            }
+
+            // ------------------------------------------------------------ permissions
+            Future<void> allowNotifications() async {
+              final r = await Permission.notification.request();
+              notifOk = r.isGranted;
+              notifyListeners();
+              if (r.isPermanentlyDenied) await openAppSettings();
+            }
+
+            /// Android 8-9 only: needed to read mobile-data usage.
+            Future<void> grantPhone() async {
+              final r = await Permission.phone.request();
+              needPhone = !r.isGranted;
+              notifyListeners();
+              if (r.isPermanentlyDenied) await openAppSettings();
+              if (r.isGranted) {
+                await Native.resync();
+                await load();
+              }
+            }
+
+            // ------------------------------------------------------------ settings
+            Future<void> setLang(String l) async {
+              lang = l;
+              notifyListeners();
+              try {
+                await Native.setLang(l, {for (final k in nativeKeys) k: t(k)});
+              } catch (_) {}
+              if (access == true) await _afterAccess();
+            }
+
+            Future<void> setBilling(int d) async {
+              billing = d;
+              notifyListeners();
+              try {
+                await Native.setBilling(d);
+              } catch (_) {}
+              unawaited(load());
+              unawaited(loadStatus());
+            }
+
+            Future<void> toggleSpeed(bool v) async {
+              if (v) {
+                final r = await Permission.notification.request();
+                notifOk = r.isGranted;
+              }
+              try {
+                await Native.setSpeed(v);
+                speed = v;
+              } catch (_) {}
+              notifyListeners();
+            }
+
+            Future<void> saveLimits() async {
+              notifyListeners();
+              try {
+                await Native.saveLimits(jsonEncode(limits));
+              } catch (_) {}
+              if (limits.isNotEmpty && !await Permission.notification.isGranted) {
+                final r = await Permission.notification.request();
+                notifOk = r.isGranted;
+                notifyListeners();
+              }
+              unawaited(loadStatus());
+            }
+
+            Future<void> exportCsv() async {
+              final r = rangeFor(pi, billing);
+              try {
+                await Native.exportCsv(r.s, r.e);
+              } catch (_) {}
+            }
+
+            // ------------------------------------------------------------ data
+            void setPeriod(int i) {
+              pi = i;
+              load();
+            }
+
+            void setNet(int i) {
+              net = i;
+              notifyListeners();
+            }
+
+            Future<void> load() async {
+              final id = ++_req;
+              loading = true;
+              error = null;
+              notifyListeners();
+              try {
+                final r = rangeFor(pi, billing);
+                final m = await Native.load(r.s, r.e, r.n, pi == 0);
+                if (id != _req) return; // a newer request replaced this one
+                wifiTotal = (m['wifi'] as num?) ?? 0;
+                mobTotal = (m['mobile'] as num?) ?? 0;
+                wifiSeries = ((m['swifi'] as List?) ?? const []).map((x) => x as num).toList();
+                mobSeries = ((m['smobile'] as List?) ?? const []).map((x) => x as num).toList();
+                usage = ((m['usage'] as List?) ?? const []).map((x) => AppUse.fromMap(x as Map)).toList();
+              } catch (e) {
+                if (id == _req) error = '$e';
+              } finally {
+                if (id == _req) {
+                  loading = false;
+                  notifyListeners();
+                }
+              }
+            }
+
+            Future<void> loadStatus() async {
+              try {
+                final m = await Native.limitStatus();
+                status = m.map((k, v) => MapEntry(k, LimitStatus.fromMap(v as Map)));
+                notifyListeners();
+              } catch (_) {}
+            }
+          }
+
+          // ======================================================================
+          // control_tab.dart
+          // ======================================================================
+          String _fmtDur(AppState s, num ms) {
+            final h = ms / 3600000;
+            if (h < 48) return '${h < 10 ? h.toStringAsFixed(1) : h.round()} ${s.t('uh')}';
+            return '${(h / 24).round()} ${s.t('ud')}';
+          }
+
+          String _mbText(num bytes) {
+            final v = bytes / 1048576;
+            return v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+          }
+
+          class ControlTab extends StatefulWidget {
+            final AppState s;
+            const ControlTab({super.key, required this.s});
+            @override
+            State<ControlTab> createState() => _ControlTabState();
+          }
+
+          class _ControlTabState extends State<ControlTab> {
+            String q = '';
+            AppState get s => widget.s;
+
+            /// Pace-based forecast text for an app that has a limit, or null.
+            (String, bool)? _forecast(String pkg, Map lim) {
+              final st = s.status[pkg];
+              if (st == null) return null;
+              final limit = lim['bytes'] as num;
+              if (st.used >= limit || st.used <= 0) return null;
+              final now = DateTime.now().millisecondsSinceEpoch;
+              final el = now - st.start;
+              if (el < 3600000) return null; // need at least an hour of data
+              final msLeft = (limit - st.used) / (st.used / el);
+              if (now + msLeft > st.end) return (s.t('fcok'), false);
+              return (s.t('fc', {'t': _fmtDur(s, msLeft)}), true);
+            }
+
+            @override
+            Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (c, _) => _body(c));
+
+            Widget _body(BuildContext context) {
+              final netNames = {'wifi': s.t('ws'), 'mobile': s.t('ms'), 'all': s.t('all')};
+              final perNames = {'day': s.t('daily'), 'month': s.t('monthly')};
+              final list = s.allApps.where((a) => a.name.toLowerCase().contains(q.toLowerCase())).toList()
+                ..sort((a, b) {
+                  final la = s.limits.containsKey(a.pkg) ? 0 : 1;
+                  final lb = s.limits.containsKey(b.pkg) ? 0 : 1;
+                  return la != lb ? la.compareTo(lb) : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+                });
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(s.t('ct'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(s.t('ch'), style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                  const SizedBox(height: 12),
+                  if (s.limits.isNotEmpty && !s.notifOk)
+                    InfoBanner(
+                      icon: Icons.notifications_off_rounded,
+                      text: s.t('notif_off'),
+                      action: s.t('allow'),
+                      onAction: s.allowNotifications,
+                    ),
+                  if (s.limits.isNotEmpty && !s.speed)
+                    InfoBanner(icon: Icons.info_outline_rounded, text: s.t('fasthint'), color: kWifi),
+                  TextField(
+                    onChanged: (v) => setState(() => q = v),
+                    decoration: InputDecoration(
+                      hintText: s.t('search'),
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      filled: true,
+                      fillColor: kCard,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: list.length,
+                      itemBuilder: (c, i) {
+                        final a = list[i];
+                        final lim = s.limits[a.pkg] as Map?;
+                        final st = s.status[a.pkg];
+                        final fc = lim == null ? null : _forecast(a.pkg, lim);
+                        final limit = (lim?['bytes'] as num?) ?? 0;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Material(
+                            color: kCard,
+                            borderRadius: BorderRadius.circular(16),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: () => _openSheet(c, a.pkg, a.name),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(children: [
+                                  avatar(a.name),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      if (lim != null) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${s.t('limit')} ${fmt(limit)} • ${netNames[lim['net']]} • ${perNames[lim['period']]}',
+                                          style: const TextStyle(color: kMob, fontSize: 12),
+                                        ),
+                                        if (st != null && limit > 0) ...[
+                                          const SizedBox(height: 6),
+                                          LinearProgressIndicator(
+                                            value: (st.used / limit).clamp(0, 1).toDouble(),
+                                            minHeight: 5,
+                                            borderRadius: BorderRadius.circular(4),
+                                            color: st.used >= limit ? Colors.redAccent : (st.used >= limit * .8 ? kWarn : kMob),
+                                            backgroundColor: Colors.white12,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text('${s.t('used')}: ${fmt(st.used)} / ${fmt(limit)}',
+                                              style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
+                                        ],
+                                        if (fc != null)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 2),
+                                            child: Text(fc.$1,
+                                                style: TextStyle(fontSize: 11.5, color: fc.$2 ? kWarn : Colors.white54)),
+                                          ),
+                                      ],
+                                    ]),
+                                  ),
+                                  Icon(lim == null ? Icons.add_circle_outline_rounded : Icons.edit_rounded, size: 20),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ]),
+              );
+            }
+
+            void _openSheet(BuildContext context, String pkg, String name) {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: kCard,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+                builder: (_) => LimitSheet(s: s, pkg: pkg, name: name),
+              );
+            }
+          }
+
+          class LimitSheet extends StatefulWidget {
+            final AppState s;
+            final String pkg, name;
+            const LimitSheet({super.key, required this.s, required this.pkg, required this.name});
+            @override
+            State<LimitSheet> createState() => _LimitSheetState();
+          }
+
+          class _LimitSheetState extends State<LimitSheet> {
+            late final TextEditingController ctl;
+            late String net, per;
+            bool bad = false;
+            AppState get s => widget.s;
+            Map? get old => s.limits[widget.pkg] as Map?;
+
+            @override
+            void initState() {
+              super.initState();
+              final o = old;
+              ctl = TextEditingController(text: o == null ? '100' : _mbText(o['bytes'] as num));
+              net = (o?['net'] as String?) ?? 'mobile';
+              per = (o?['period'] as String?) ?? 'month';
+            }
+
+            @override
+            void dispose() {
+              ctl.dispose();
+              super.dispose();
+            }
+
+            void _save() {
+              final mb = double.tryParse(ctl.text.trim().replaceAll(',', '.'));
+              if (mb == null || mb <= 0) {
+                setState(() => bad = true);
+                return;
+              }
+              s.limits[widget.pkg] = {'bytes': (mb * 1048576).round(), 'net': net, 'period': per};
+              Navigator.pop(context);
+              s.saveLimits();
+            }
+
+            @override
+            Widget build(BuildContext context) => SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+                    child: SingleChildScrollView(
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          avatar(widget.name),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(widget.name,
+                                maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          ),
+                        ]),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: ctl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(
+                            labelText: s.t('lmb'),
+                            errorText: bad ? s.t('badnum') : null,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<String>(
+                            segments: [
+                              ButtonSegment(value: 'mobile', label: Text(s.t('ms'))),
+                              ButtonSegment(value: 'wifi', label: Text(s.t('ws'))),
+                              ButtonSegment(value: 'all', label: Text(s.t('all'))),
+                            ],
+                            selected: {net},
+                            onSelectionChanged: (v) => setState(() => net = v.first),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<String>(
+                            segments: [
+                              ButtonSegment(value: 'day', label: Text(s.t('daily'))),
+                              ButtonSegment(value: 'month', label: Text(s.t('monthly'))),
+                            ],
+                            selected: {per},
+                            onSelectionChanged: (v) => setState(() => per = v.first),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        OutlinedButton.icon(
+                          onPressed: () => Native.openAppData(widget.pkg),
+                          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                          label: Text(s.t('opensettings')),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(children: [
+                          if (old != null)
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () {
+                                  s.limits.remove(widget.pkg);
+                                  Navigator.pop(context);
+                                  s.saveLimits();
+                                },
+                                child: Text(s.t('remove')),
+                              ),
+                            ),
+                          Expanded(child: FilledButton(onPressed: _save, child: Text(s.t('save')))),
+                        ]),
+                      ]),
+                    ),
+                  ),
+                );
+          }
+
+          // ======================================================================
+          // usage_tab.dart
+          // ======================================================================
+          class UsageTab extends StatelessWidget {
+            final AppState s;
+            const UsageTab({super.key, required this.s});
+
+            String _name(AppUse a) {
+              if (a.name.isNotEmpty) return a.name;
+              return a.uid == -4
+                  ? s.t('removed')
+                  : a.uid == -5
+                      ? s.t('teth')
+                      : s.t('sys');
+            }
+
+            @override
+            Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (c, _) => _body(c));
+
+            Widget _body(BuildContext context) {
+              final isWifi = s.net == 0;
+              final col = isWifi ? kWifi : kMob;
+              final list = s.usage.where((a) => a.byNet(s.net) > 0).toList()
+                ..sort((a, b) => b.byNet(s.net).compareTo(a.byNet(s.net)));
+              final num mx = list.isEmpty ? 1 : list.first.byNet(s.net);
+              final series = isWifi ? s.wifiSeries : s.mobSeries;
+              final total = isWifi ? s.wifiTotal : s.mobTotal;
+              final proj = s.pi == 2 ? projectCycle(total, rangeFor(2, s.billing)) : null;
+
+              return RefreshIndicator(
+                onRefresh: s.load,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Row(children: [
+                      const Expanded(child: Text('Dataly', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
+                      if (s.loading)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 8),
+                          child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.settings_rounded),
+                        tooltip: s.t('settings'),
+                        onPressed: () => showSettingsSheet(context, s),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    if (s.needPhone)
+                      InfoBanner(
+                        icon: Icons.phone_android_rounded,
+                        text: s.t('phone_why'),
+                        action: s.t('grant'),
+                        onAction: s.grantPhone,
+                      ),
+                    if (s.error != null)
+                      InfoBanner(
+                        icon: Icons.error_outline_rounded,
+                        text: s.t('err'),
+                        action: s.t('retry'),
+                        onAction: s.load,
+                        color: Colors.redAccent,
+                      ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: cardBox(),
+                      child: SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(s.t('speed'), style: const TextStyle(fontSize: 14)),
+                        value: s.speed,
+                        onChanged: s.toggleSpeed,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: [
+                        for (var i = 0; i < periodKeys.length; i++)
+                          Padding(
+                            padding: const EdgeInsetsDirectional.only(end: 8),
+                            child: ChoiceChip(
+                              label: Text(s.t(periodKeys[i])),
+                              selected: s.pi == i,
+                              onSelected: (_) => s.setPeriod(i),
+                            ),
+                          ),
+                      ]),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      NetCard(label: s.t('uw'), value: s.wifiTotal, color: kWifi, selected: isWifi, onTap: () => s.setNet(0)),
+                      const SizedBox(width: 12),
+                      NetCard(label: s.t('um'), value: s.mobTotal, color: kMob, selected: !isWifi, onTap: () => s.setNet(1)),
+                    ]),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: cardBox(),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        BarChart(values: series, color: col),
+                        if (proj != null) ...[
+                          const SizedBox(height: 12),
+                          Row(children: [
+                            Icon(Icons.trending_up_rounded, size: 18, color: col),
+                            const SizedBox(width: 8),
+                            Text('${s.t('proj')}: ${fmt(proj)}', style: const TextStyle(fontSize: 13)),
+                          ]),
+                        ],
+                      ]),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(s.t('top'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    for (final a in list.take(40))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Material(
+                          color: kCard,
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: a.isRealApp
+                                ? () => Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (_) => AppDetailScreen(s: s, pkg: a.pkg, name: _name(a))))
+                                : null,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(children: [
+                                avatar(_name(a)),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Text(_name(a), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    const SizedBox(height: 6),
+                                    LinearProgressIndicator(
+                                      value: (a.byNet(s.net) / mx).toDouble(),
+                                      minHeight: 5,
+                                      borderRadius: BorderRadius.circular(4),
+                                      color: col,
+                                      backgroundColor: col.withValues(alpha: .15),
+                                    ),
+                                  ]),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(fmt(a.byNet(s.net)), style: const TextStyle(fontWeight: FontWeight.w600)),
+                              ]),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (list.isEmpty && !s.loading)
+                      const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('—'))),
+                  ],
+                ),
+              );
+            }
+          }
+
+          // ======================================================================
+          // app_detail.dart
+          // ======================================================================
+          /// Per-app details: Wi-Fi vs mobile, foreground vs background, usage over time.
+          class AppDetailScreen extends StatefulWidget {
+            final AppState s;
+            final String pkg, name;
+            const AppDetailScreen({super.key, required this.s, required this.pkg, required this.name});
+            @override
+            State<AppDetailScreen> createState() => _AppDetailScreenState();
+          }
+
+          class _AppDetailScreenState extends State<AppDetailScreen> {
+            AppState get s => widget.s;
+            late int idx; // 1..4 (no hourly view per app)
+            AppDetail? d;
+            String? err;
+
+            @override
+            void initState() {
+              super.initState();
+              idx = s.pi == 0 ? 1 : s.pi;
+              _load();
+            }
+
+            Future<void> _load() async {
+              final wanted = idx;
+              setState(() {
+                d = null;
+                err = null;
+              });
+              try {
+                final r = rangeFor(wanted, s.billing);
+                final m = await Native.detail(widget.pkg, r.s, r.e, r.n);
+                if (!mounted || wanted != idx) return;
+                setState(() => d = AppDetail.fromMap(m));
+              } catch (e) {
+                if (mounted && wanted == idx) setState(() => err = '$e');
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              final det = d;
+              return Scaffold(
+                appBar: AppBar(
+                  title: Text(widget.name, overflow: TextOverflow.ellipsis),
+                  backgroundColor: kBg,
+                  actions: [
+                    IconButton(
+                      tooltip: s.t('opensettings'),
+                      icon: const Icon(Icons.open_in_new_rounded),
+                      onPressed: () => Native.openAppData(widget.pkg),
+                    ),
+                  ],
+                ),
+                body: ListView(padding: const EdgeInsets.all(16), children: [
+                  Row(children: [
+                    avatar(widget.name, size: 48),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(widget.pkg, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    ),
+                  ]),
+                  const SizedBox(height: 14),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (var i = 1; i < periodKeys.length; i++)
+                        Padding(
+                          padding: const EdgeInsetsDirectional.only(end: 8),
+                          child: ChoiceChip(
+                            label: Text(s.t(periodKeys[i])),
+                            selected: idx == i,
+                            onSelected: (_) {
+                              idx = i;
+                              _load();
+                            },
+                          ),
+                        ),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  if (err != null)
+                    InfoBanner(
+                        icon: Icons.error_outline_rounded, text: s.t('err'), action: s.t('retry'), onAction: _load, color: Colors.redAccent)
+                  else if (det == null)
+                    const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
+                  else ...[
+                    Row(children: [
+                      NetCard(label: s.t('wifi'), value: det.wifi, color: kWifi, selected: false, onTap: () {}),
+                      const SizedBox(width: 12),
+                      NetCard(label: s.t('mobile'), value: det.mobile, color: kMob, selected: false, onTap: () {}),
+                    ]),
+                    const SizedBox(height: 14),
+                    _fgBg(det),
+                    const SizedBox(height: 14),
+                    _chartCard(s.t('wifi'), det.sWifi, kWifi),
+                    const SizedBox(height: 12),
+                    _chartCard(s.t('mobile'), det.sMobile, kMob),
+                  ],
+                ]),
+              );
+            }
+
+            Widget _fgBg(AppDetail det) {
+              final total = det.fg + det.bg;
+              return Container(
+                padding: const EdgeInsets.all(16),
+                decoration: cardBox(),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  LinearProgressIndicator(
+                    value: total > 0 ? (det.fg / total).toDouble() : 0,
+                    minHeight: 8,
+                    borderRadius: BorderRadius.circular(6),
+                    color: kWarn,
+                    backgroundColor: Colors.white12,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('${s.t('fg')}: ${fmt(det.fg)}', style: const TextStyle(fontSize: 13, color: kWarn)),
+                    Text('${s.t('bg')}: ${fmt(det.bg)}', style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                  ]),
+                ]),
+              );
+            }
+
+            Widget _chartCard(String title, List<num> values, Color color) => Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: cardBox(),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${s.t('perday')} • $title', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 10),
+                    BarChart(values: values, color: color),
+                  ]),
+                );
+          }
+
+          // ======================================================================
+          // home.dart
+          // ======================================================================
+          class Home extends StatefulWidget {
+            final AppState state;
+            const Home({super.key, required this.state});
+            @override
+            State<Home> createState() => _HomeState();
+          }
+
+          class _HomeState extends State<Home> with WidgetsBindingObserver {
+            int tab = 0;
+            AppState get s => widget.state;
+
+            @override
+            void initState() {
+              super.initState();
+              WidgetsBinding.instance.addObserver(this);
+              s.init();
+            }
+
+            @override
+            void dispose() {
+              WidgetsBinding.instance.removeObserver(this);
+              super.dispose();
+            }
+
+            @override
+            void didChangeAppLifecycleState(AppLifecycleState st) {
+              if (st == AppLifecycleState.resumed && s.ready) s.init();
+            }
+
+            @override
+            Widget build(BuildContext context) => ListenableBuilder(
+                  listenable: s,
+                  builder: (context, _) {
+                    if (s.access == null) {
+                      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+                    }
+                    if (s.lang.isEmpty) return _LangScreen(s: s);
+                    if (s.access == false) return _Onboard(s: s);
+                    return Scaffold(
+                      body: SafeArea(
+                        child: IndexedStack(
+                          index: tab,
+                          children: [UsageTab(s: s), ControlTab(s: s)],
+                        ),
+                      ),
+                      bottomNavigationBar: NavigationBar(
+                        selectedIndex: tab,
+                        onDestinationSelected: (i) => setState(() => tab = i),
+                        destinations: [
+                          NavigationDestination(icon: const Icon(Icons.bar_chart_rounded), label: s.t('tu')),
+                          NavigationDestination(icon: const Icon(Icons.tune_rounded), label: s.t('tc')),
+                        ],
+                      ),
+                    );
+                  },
+                );
+          }
+
+          // ------------------------------------------------------------------ language
+
+          class LangList extends StatelessWidget {
+            final String current;
+            final void Function(String) onPick;
+            const LangList({super.key, required this.current, required this.onPick});
+
+            @override
+            Widget build(BuildContext context) => ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final e in langs.entries)
+                      ListTile(
+                        title: Text(e.value),
+                        trailing: current == e.key ? const Icon(Icons.check_rounded, color: kMob) : null,
+                        onTap: () => onPick(e.key),
+                      ),
+                  ],
+                );
+          }
+
+          void showLangSheet(BuildContext context, AppState s) {
+            showModalBottomSheet(
+              context: context,
+              backgroundColor: kCard,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+              builder: (c) => SafeArea(
+                child: LangList(
+                  current: s.lang,
+                  onPick: (l) {
+                    Navigator.pop(c);
+                    s.setLang(l);
+                  },
+                ),
+              ),
+            );
+          }
+
+          class _LangScreen extends StatelessWidget {
+            final AppState s;
+            const _LangScreen({required this.s});
+
+            @override
+            Widget build(BuildContext context) => Scaffold(
+                  body: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(children: [
+                        const SizedBox(height: 32),
+                        const Text('Dataly', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        const Text('Choose your language • اختر لغتك', style: TextStyle(color: Colors.white70)),
+                        const SizedBox(height: 24),
+                        Expanded(child: LangList(current: '', onPick: s.setLang)),
+                      ]),
+                    ),
+                  ),
+                );
+          }
+
+          // ------------------------------------------------------------------ onboarding
+
+          class _Onboard extends StatelessWidget {
+            final AppState s;
+            const _Onboard({required this.s});
+
+            @override
+            Widget build(BuildContext context) => Scaffold(
+                  body: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(28),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        const Icon(Icons.data_usage_rounded, size: 72, color: kMob),
+                        const SizedBox(height: 24),
+                        Text(s.t('perm'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, height: 1.5)),
+                        const SizedBox(height: 28),
+                        FilledButton(onPressed: Native.openAccess, child: Text(s.t('grant'))),
+                        const SizedBox(height: 12),
+                        TextButton(onPressed: () => showLangSheet(context, s), child: Text(s.t('lang'))),
+                      ]),
+                    ),
+                  ),
+                );
+          }
+
+          // ------------------------------------------------------------------ settings
+
+          void showSettingsSheet(BuildContext context, AppState s) {
+            showModalBottomSheet(
+              context: context,
+              backgroundColor: kCard,
+              isScrollControlled: true,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+              builder: (c) => SafeArea(
+                child: ListenableBuilder(
+                  listenable: s,
+                  builder: (c2, _) => SingleChildScrollView(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Text(s.t('settings'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.language_rounded),
+                        title: Text(s.t('lang')),
+                        subtitle: Text(langs[s.lang] ?? ''),
+                        onTap: () {
+                          Navigator.pop(c);
+                          showLangSheet(context, s);
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.event_repeat_rounded),
+                        title: Text(s.t('bill')),
+                        subtitle: Text(s.t('billh')),
+                        trailing: DropdownButton<int>(
+                          value: s.billing,
+                          underline: const SizedBox(),
+                          items: [for (var d = 1; d <= 28; d++) DropdownMenuItem(value: d, child: Text('$d'))],
+                          onChanged: (v) {
+                            if (v != null) s.setBilling(v);
+                          },
+                        ),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.ios_share_rounded),
+                        title: Text(s.t('export')),
+                        subtitle: Text(s.t('exporth')),
+                        onTap: () {
+                          Navigator.pop(c);
+                          s.exportCsv();
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                    ]),
+                  ),
+                ),
+              ),
+            );
+          }
+
+          // ======================================================================
+          // main.dart
+          // ======================================================================
+          void main() {
+            WidgetsFlutterBinding.ensureInitialized();
+            runApp(const DatalyApp());
+          }
+
+          class DatalyApp extends StatefulWidget {
+            const DatalyApp({super.key});
+            @override
+            State<DatalyApp> createState() => _DatalyAppState();
+          }
+
+          class _DatalyAppState extends State<DatalyApp> {
+            final AppState s = AppState();
+            String _lang = '';
+
+            @override
+            void initState() {
+              super.initState();
+              // Rebuild MaterialApp only when the language changes (drives locale + text direction).
+              s.addListener(() {
+                if (s.lang != _lang) setState(() => _lang = s.lang);
+              });
+            }
+
+            @override
+            void dispose() {
+              s.dispose();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext context) => MaterialApp(
+                  debugShowCheckedModeBanner: false,
+                  title: 'Dataly',
+                  locale: Locale(_lang.isEmpty ? 'en' : _lang),
+                  supportedLocales: [for (final k in langs.keys) Locale(k)],
+                  localizationsDelegates: const [
+                    GlobalMaterialLocalizations.delegate,
+                    GlobalWidgetsLocalizations.delegate,
+                    GlobalCupertinoLocalizations.delegate,
+                  ],
+                  theme: ThemeData(
+                    useMaterial3: true,
+                    brightness: Brightness.dark,
+                    scaffoldBackgroundColor: kBg,
+                    colorScheme: const ColorScheme.dark(primary: kWifi, surface: kCard),
+                  ),
+                  home: Home(state: s),
+                );
+          }
+          EOF
+
+      - name: Build release APK
         working-directory: app_build
-        run: gradle assembleDebug
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ github.run_number }}" app_build/app/build/outputs/apk/debug/app-debug.apk --repo "$GITHUB_REPOSITORY" --title "APK" --notes "ready"
+          # Notification channels / foreground service need API 26+
+          sed -i 's/flutter\.minSdkVersion/26/' android/app/build.gradle*
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataly-apk
+          path: app_build/build/app/outputs/flutter-apk/app-release.apk
