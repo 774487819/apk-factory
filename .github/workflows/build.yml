@@ -2680,7 +2680,7 @@ jobs:
                   if (idx == 5 && s.custom != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 10),
-                      child: Text(rangeLabel(context, s.custom!), style: const TextStyle(color: kCyan, fontWeight: FontWeight.w700)),
+                      child: Text(rangeLabel(context, s.custom!), style: const TextStyle(color: kWifi, fontWeight: FontWeight.w700)),
                     ),
                   const SizedBox(height: 14),
                   if (err != null)
@@ -3027,6 +3027,8 @@ jobs:
           echo "android.suppressUnsupportedCompileSdk=37" >> android/gradle.properties
           grep -n "compileSdk\|minSdk" android/app/build.gradle*
           flutter pub get
+          # prints every Dart error in one short list (does not stop the build)
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | grep -E "error|Analyzing|issues? found|No issues" || true
           flutter build apk --release
 
       - name: Upload APK
