@@ -1,12 +1,59 @@
-name: Build Dataly APK
+name: Build Dataly (APK + Google Play AAB)
 
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      action:
+        description: 'build = build the app, create-keystore = make the Google Play upload key (run once)'
+        type: choice
+        default: build
+        options:
+          - build
+          - create-keystore
 
 jobs:
+  # ------------------------------------------------------------------ one-time: upload key for Google Play
+  create_keystore:
+    if: "github.event_name == 'workflow_dispatch' && inputs.action == 'create-keystore'"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Generate upload keystore
+        run: |
+          mkdir -p out
+          PASS=$(openssl rand -hex 16)
+          echo "::add-mask::$PASS"
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore out/upload-keystore.jks \
+            -alias upload -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$PASS" -keypass "$PASS" \
+            -dname "CN=Dataly, OU=Mobile, O=Dataly, C=US"
+          base64 -w 0 out/upload-keystore.jks > out/KEYSTORE_BASE64.txt
+          {
+            echo "Create these 4 repository secrets (Settings > Secrets and variables > Actions):"
+            echo ""
+            echo "KEYSTORE_BASE64   = the whole content of KEYSTORE_BASE64.txt"
+            echo "KEYSTORE_PASSWORD = $PASS"
+            echo "KEY_ALIAS         = upload"
+            echo "KEY_PASSWORD      = $PASS"
+          } > out/SECRETS.txt
+
+      - name: Upload keystore (keep this repository PRIVATE and delete the artifact afterwards)
+        uses: actions/upload-artifact@v4
+        with:
+          name: upload-keystore
+          path: out/
+          retention-days: 1
+
+  # ------------------------------------------------------------------ build the app
   build_apk:
+    if: "github.event_name != 'workflow_dispatch' || inputs.action == 'build'"
     runs-on: ubuntu-latest
     steps:
       - name: Set up JDK 17
@@ -144,6 +191,10 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <!-- Wi-Fi name (SSID): Android treats it as location data, so it needs the location permission -->
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <!-- Only needed on Android 8-9 to read mobile-data usage -->
               <uses-permission android:name="android.permission.READ_PHONE_STATE"
                   android:maxSdkVersion="28" />
@@ -286,6 +337,10 @@ jobs:
           import android.graphics.Canvas
           import android.net.ConnectivityManager
           import android.net.NetworkCapabilities
+          import android.net.NetworkRequest
+          import android.net.wifi.WifiManager
+          import android.location.LocationManager
+          import androidx.core.location.LocationManagerCompat
           import android.net.VpnService
           import android.net.TrafficStats
           import android.net.Uri
@@ -716,6 +771,7 @@ jobs:
                       AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 60_000L,
                       AlarmManager.INTERVAL_FIFTEEN_MINUTES, pi
                   )
+                  NetLog.register(ctx)
               }
           }
 
@@ -723,17 +779,20 @@ jobs:
           /** Local daily history (per app, per day) so long periods are not limited by Android's retention. */
           object History {
               const val TOTAL = "*"
+              private const val NET_SQL = "CREATE TABLE IF NOT EXISTS netuse(day INTEGER NOT NULL, net TEXT NOT NULL, " +
+                  "pkg TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(day, net, pkg))"
               private val running = AtomicBoolean(false)
               private var helper: Helper? = null
 
-              private class Helper(c: Context) : SQLiteOpenHelper(c.applicationContext, "history.db", null, 1) {
+              private class Helper(c: Context) : SQLiteOpenHelper(c.applicationContext, "history.db", null, 2) {
                   override fun onCreate(db: SQLiteDatabase) {
                       db.execSQL(
                           "CREATE TABLE daily(day INTEGER NOT NULL, pkg TEXT NOT NULL, " +
                               "wifi INTEGER NOT NULL, mobile INTEGER NOT NULL, PRIMARY KEY(day, pkg))"
                       )
+                      db.execSQL(NET_SQL)
                   }
-                  override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
+                  override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) { db.execSQL(NET_SQL) }
               }
 
               @Synchronized
@@ -742,7 +801,7 @@ jobs:
                   return h.writableDatabase
               }
 
-              private fun pkgOf(pm: PackageManager, uid: Int): String {
+              fun pkgOf(pm: PackageManager, uid: Int): String {
                   if (uid < 0) return "uid:$uid"
                   val p = try { pm.getPackagesForUid(uid)?.firstOrNull() } catch (_: Exception) { null }
                   if (p != null) return p
@@ -828,6 +887,41 @@ jobs:
 
               fun totals(c: Context, s: Long, e: Long) = pkgTotals(c, TOTAL, s, e)
 
+              fun addNet(c: Context, day: Long, rows: Map<String, Long>) {
+                  synchronized(this) {
+                      val d = db(c)
+                      d.beginTransaction()
+                      try {
+                          for ((k, v) in rows) {
+                              val i = k.lastIndexOf('|')          // the Wi-Fi name may contain '|', the package never does
+                              val net = k.substring(0, i)
+                              val pkg = k.substring(i + 1)
+                              d.execSQL("INSERT OR IGNORE INTO netuse(day, net, pkg, bytes) VALUES(?,?,?,0)", arrayOf<Any>(day, net, pkg))
+                              d.execSQL("UPDATE netuse SET bytes = bytes + ? WHERE day=? AND net=? AND pkg=?", arrayOf<Any>(v, day, net, pkg))
+                          }
+                          d.setTransactionSuccessful()
+                      } finally { d.endTransaction() }
+                  }
+              }
+
+              fun netTotals(c: Context, s: Long, e: Long): List<Pair<String, Long>> {
+                  val out = ArrayList<Pair<String, Long>>()
+                  db(c).rawQuery(
+                      "SELECT net, SUM(bytes) FROM netuse WHERE day>=? AND day<? GROUP BY net ORDER BY 2 DESC",
+                      arrayOf(s.toString(), e.toString())
+                  ).use { while (it.moveToNext()) out.add(Pair(it.getString(0), it.getLong(1))) }
+                  return out
+              }
+
+              fun netApps(c: Context, net: String, s: Long, e: Long): List<Pair<String, Long>> {
+                  val out = ArrayList<Pair<String, Long>>()
+                  db(c).rawQuery(
+                      "SELECT pkg, SUM(bytes) FROM netuse WHERE net=? AND day>=? AND day<? GROUP BY pkg ORDER BY 2 DESC",
+                      arrayOf(net, s.toString(), e.toString())
+                  ).use { while (it.moveToNext()) out.add(Pair(it.getString(0), it.getLong(1))) }
+                  return out
+              }
+
               /** Start of the earliest day stored in the history (0 when nothing is stored yet). */
               fun firstDay(c: Context): Long {
                   db(c).rawQuery("SELECT MIN(day) FROM daily", null).use { return if (it.moveToFirst()) it.getLong(0) else 0L }
@@ -886,6 +980,101 @@ jobs:
                       }
                   }
                   return f
+              }
+          }
+
+          // ---------------------------------------------------------------- NetLog
+          /**
+           * Per-network usage. Android has no public per-Wi-Fi statistics, so Dataly records time segments:
+           * every segment is attributed to the Wi-Fi / mobile network that was connected during it.
+           * A network-change callback (PendingIntent) closes the segment at the moment you switch networks.
+           */
+          object NetLog {
+              private val lock = Any()
+              private const val UNKNOWN = "?"
+
+              /** (connected, ssid or "" when hidden, networkId) */
+              @Suppress("DEPRECATION")
+              fun wifiInfo(c: Context): Triple<Boolean, String, Int> {
+                  return try {
+                      val cm = c.getSystemService(ConnectivityManager::class.java)
+                      val connected = cm.allNetworks.any {
+                          cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                      }
+                      if (!connected) return Triple(false, "", -1)
+                      val wm = c.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                      val info = wm.connectionInfo
+                      val id = info?.networkId ?: -1
+                      var ssid = (info?.ssid ?: "").trim('"')
+                      if (ssid == "<unknown ssid>" || ssid == "0x") ssid = ""
+                      val p = Core.prefs(c)
+                      if (ssid.isNotEmpty()) {
+                          if (id >= 0) p.edit().putString("ssid_$id", ssid).apply()   // remember it for background ticks
+                      } else if (id >= 0) {
+                          ssid = p.getString("ssid_$id", "") ?: ""
+                      }
+                      Triple(true, ssid, id)
+                  } catch (_: Exception) { Triple(false, "", -1) }
+              }
+
+              fun mobileName(c: Context): String = try {
+                  val tm = c.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                  val n = tm.networkOperatorName
+                  if (!n.isNullOrBlank()) n else (tm.simOperatorName ?: "")
+              } catch (_: Exception) { "" }
+
+              /** Listen for network changes even when the app is closed. Safe to call repeatedly. */
+              fun register(c: Context) {
+                  try {
+                      val cm = c.getSystemService(ConnectivityManager::class.java)
+                      val req = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
+                      val pi = PendingIntent.getBroadcast(
+                          c, 78, Intent(c, MonitorReceiver::class.java).setAction(MonitorReceiver.NET),
+                          PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                      )
+                      cm.registerNetworkCallback(req, pi)
+                  } catch (_: Exception) {}
+              }
+
+              fun tick(c: Context, force: Boolean = false) = synchronized(lock) { doTick(c.applicationContext, force) }
+
+              private fun doTick(c: Context, force: Boolean) {
+                  if (!Core.hasUsageAccess(c)) return
+                  val p = Core.prefs(c)
+                  val now = System.currentTimeMillis()
+                  val (wc, wname, wid) = wifiInfo(c)
+                  val prevW = p.getString("nl_w", "") ?: ""
+                  val prevM = p.getString("nl_m", "") ?: ""
+                  var wkey = if (!wc) "" else "w:" + wname.ifEmpty { UNKNOWN }
+                  // name hidden right now but it is the same Wi-Fi as before -> keep the known name
+                  if (wc && wname.isEmpty() && wid >= 0 && wid == p.getInt("nl_wid", -2) && prevW.startsWith("w:")) wkey = prevW
+                  val mkey = "m:" + mobileName(c).ifEmpty { UNKNOWN }
+                  val last = p.getLong("nl_t", 0L)
+                  fun save() = p.edit().putLong("nl_t", now).putString("nl_w", wkey).putString("nl_m", mkey).putInt("nl_wid", wid).apply()
+                  if (last == 0L) { save(); return }
+                  val changed = wkey != prevW || mkey != prevM
+                  if (!changed && !force && now - last < 5 * 60_000L) return
+                  closeSegment(c, maxOf(last, now - 7L * 86_400_000L), now, prevW, prevM)
+                  save()
+              }
+
+              private fun closeSegment(c: Context, t0: Long, t1: Long, wkey: String, mkey: String) {
+                  var a = t0
+                  while (a < t1) {
+                      val day = Core.dayStart(a)
+                      val b = minOf(Core.nextDay(day), t1)
+                      attribute(c, day, a, b, wkey.ifEmpty { "w:$UNKNOWN" }, mkey.ifEmpty { "m:$UNKNOWN" })
+                      a = b
+                  }
+              }
+
+              private fun attribute(c: Context, day: Long, a: Long, b: Long, wkey: String, mkey: String) {
+                  val pm = c.packageManager
+                  val rows = HashMap<String, Long>()
+                  fun add(net: String, pkg: String, v: Long) { if (v > 0) rows["$net|$pkg"] = (rows["$net|$pkg"] ?: 0L) + v }
+                  for ((uid, u) in Core.usageByUid(c, ConnectivityManager.TYPE_WIFI, a, b)) add(wkey, History.pkgOf(pm, uid), u.total)
+                  for ((uid, u) in Core.usageByUid(c, ConnectivityManager.TYPE_MOBILE, a, b)) add(mkey, History.pkgOf(pm, uid), u.total)
+                  if (rows.isNotEmpty()) History.addNet(c, day, rows)
               }
           }
 
@@ -971,7 +1160,10 @@ jobs:
           // ---------------------------------------------------------------- MonitorReceiver
           /** Periodic alarm tick + boot/update handler. */
           class MonitorReceiver : BroadcastReceiver() {
-              companion object { const val TICK = "com.dataly.app.TICK" }
+              companion object {
+                  const val TICK = "com.dataly.app.TICK"
+                  const val NET = "com.dataly.app.NET"
+              }
 
               override fun onReceive(c: Context, i: Intent?) {
                   val ctx = c.applicationContext
@@ -982,7 +1174,16 @@ jobs:
                           work(ctx)
                       }
                       TICK -> work(ctx)
+                      NET -> netChanged(ctx)
                   }
+              }
+
+              /** The connected network changed: close the usage segment of the previous one. */
+              private fun netChanged(ctx: Context) {
+                  val p = goAsync()
+                  Thread {
+                      try { NetLog.tick(ctx) } catch (_: Throwable) {} finally { p.finish() }
+                  }.start()
               }
 
               private fun work(ctx: Context) {
@@ -990,6 +1191,7 @@ jobs:
                   Thread {
                       try {
                           if (Core.hasUsageAccess(ctx)) {
+                              NetLog.tick(ctx)
                               History.sync(ctx)
                               Core.checkLimits(ctx)
                               DatalyWidget.refresh(ctx)
@@ -1216,6 +1418,7 @@ jobs:
                                       "lang" to (p.getString("lang", "") ?: ""),
                                       "bill" to Core.billingDay(ctx),
                                       "vpn_policy" to Core.vpnPolicy(ctx),
+                                      "vpn_consent" to p.getBoolean("vpn_consent", false),
                                       "hist_start" to History.firstDay(ctx),
                                       "locked" to Core.lockedSet(ctx).toList(),
                                       "sdk" to Build.VERSION.SDK_INT
@@ -1259,7 +1462,7 @@ jobs:
 
                               "startMonitor" -> {
                                   Core.scheduleMonitor(ctx)
-                                  Thread { History.sync(ctx); Core.checkLimits(ctx); DatalyWidget.refresh(ctx); Core.applyBlocking(ctx) }.start()
+                                  Thread { NetLog.tick(ctx, true); History.sync(ctx); Core.checkLimits(ctx); DatalyWidget.refresh(ctx); Core.applyBlocking(ctx) }.start()
                                   res.success(null)
                               }
 
@@ -1337,6 +1540,41 @@ jobs:
                                       } catch (_: Exception) {}
                                   }
                                   out
+                              }
+
+                              "netNow" -> bg(res) {
+                                  val (wc, wn, _) = NetLog.wifiInfo(ctx)
+                                  val fine = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                  val locOn = try { LocationManagerCompat.isLocationEnabled(ctx.getSystemService(LocationManager::class.java)) } catch (_: Exception) { true }
+                                  mapOf("wifiConnected" to wc, "wifiName" to wn, "mobile" to NetLog.mobileName(ctx), "fine" to fine, "locOn" to locOn)
+                              }
+
+                              "netUsage" -> bg(res) {
+                                  NetLog.tick(ctx, true)
+                                  NetLog.netTotals(ctx, s, e).map { mapOf("net" to it.first, "bytes" to it.second) }
+                              }
+
+                              "netApps" -> bg(res) {
+                                  val net = call.argument<String>("net") ?: ""
+                                  NetLog.netApps(ctx, net, s, e).map { (pkg, bytes) ->
+                                      val isUid = pkg.startsWith("uid:")
+                                      mapOf(
+                                          "pkg" to pkg,
+                                          "uid" to (if (isUid) (pkg.substring(4).toIntOrNull() ?: 0) else 0),
+                                          "name" to (if (isUid) "" else Core.appLabel(ctx, pkg)),
+                                          "bytes" to bytes
+                                      )
+                                  }
+                              }
+
+                              "openLocationSettings" -> {
+                                  try { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } catch (_: Exception) {}
+                                  res.success(null)
+                              }
+
+                              "setConsent" -> {
+                                  Core.prefs(ctx).edit().putBoolean("vpn_consent", true).apply()
+                                  res.success(null)
                               }
 
                               "setLocked" -> {
@@ -1450,6 +1688,20 @@ jobs:
               'bk_title': '{app} is blocked', 'bk_body': 'Data limit reached. Its internet is cut until the period resets.', 'bkv_title': 'Couldn’t block {app}', 'bkv_body': 'Blocking needs Dataly’s VPN: another VPN may be active, or permission was withdrawn. Open Dataly to fix it.',
               'pick': 'Pick date', 'nodata': 'No usage was recorded for this date. History starts from the day Dataly began recording.', 'total': 'Total',
               'lockall': 'Lock all', 'unlockall': 'Unlock all', 'lockall_q': 'Cut the internet for {n} apps until you unlock them?', 'cancel': 'Cancel', 'locked': 'Locked',
+              'vpn_c_title': 'VPN permission needed',
+              'vpn_c_body': 'Dataly uses Android’s VPN service only as a local firewall. It routes the apps you lock, or that reached their data limit, into an empty tunnel so they have no internet. All other apps are not affected. No data leaves your phone, no traffic is read, collected or sent to any server, and no remote VPN is used. Android will now ask you to confirm.',
+              'agree': 'Agree',
+              'nets_tab': 'Networks',
+              'net_now': 'Connected now',
+              'net_none': 'Not connected',
+              'wifi_unnamed': 'Wi‑Fi (name hidden)',
+              'mob_unnamed': 'Mobile data',
+              'net_used': 'Usage by network',
+              'net_apps': 'Apps on this network',
+              'net_loc': 'Android needs Location permission, with Location turned on, to show Wi‑Fi names. Dataly never reads or stores your location.',
+              'net_loc_on': 'Open location settings',
+              'net_note': 'Usage is split by network from the moment Dataly started watching; earlier usage can’t be divided by network. Figures are approximate.',
+              'net_empty': 'No usage recorded per network yet. Use your phone for a while and check back.',
             },
             'ar': {
               'perm': 'لقراءة استهلاك كل تطبيق يحتاج Dataly صلاحية "الوصول إلى بيانات الاستخدام".\nفعّله من الشاشة التالية ثم ارجع للتطبيق.',
@@ -1469,6 +1721,20 @@ jobs:
               'bk_title': 'تم حظر {app}', 'bk_body': 'وصل إلى حد الاستهلاك، وقُطع إنترنته حتى تبدأ الفترة التالية.', 'bkv_title': 'تعذّر حظر {app}', 'bkv_body': 'يحتاج الحظر إلى VPN الخاص بـ Dataly: قد يكون VPN آخر يعمل أو سُحبت الصلاحية. افتح Dataly لإصلاح ذلك.',
               'pick': 'اختر تاريخاً', 'nodata': 'لا يوجد استهلاك مسجَّل لهذا التاريخ. يبدأ السجل من اليوم الذي بدأ فيه Dataly بالتسجيل.', 'total': 'الإجمالي',
               'lockall': 'قفل الكل', 'unlockall': 'فتح الكل', 'lockall_q': 'قطع الإنترنت عن {n} تطبيقاً حتى تفتحها بنفسك؟', 'cancel': 'إلغاء', 'locked': 'مقفل',
+              'vpn_c_title': 'مطلوب إذن VPN',
+              'vpn_c_body': 'يستخدم Dataly خدمة VPN في أندرويد كجدار حماية محلي فقط. يوجّه التطبيقات التي تقفلها أو التي بلغت حدّ الاستهلاك إلى نفق فارغ فلا يصلها الإنترنت، ولا يتأثر أي تطبيق آخر. لا تخرج أي بيانات من هاتفك، ولا تُقرأ حركة الشبكة ولا تُجمع ولا تُرسل إلى أي خادم، ولا يُستخدم أي VPN بعيد. سيطلب منك أندرويد التأكيد الآن.',
+              'agree': 'موافق',
+              'nets_tab': 'الشبكات',
+              'net_now': 'متصل الآن',
+              'net_none': 'غير متصل',
+              'wifi_unnamed': 'واي فاي (الاسم مخفي)',
+              'mob_unnamed': 'بيانات الجوال',
+              'net_used': 'الاستهلاك حسب الشبكة',
+              'net_apps': 'التطبيقات على هذه الشبكة',
+              'net_loc': 'يحتاج أندرويد إلى إذن الموقع مع تشغيل الموقع لعرض أسماء شبكات الواي فاي. لا يقرأ Dataly موقعك ولا يخزّنه.',
+              'net_loc_on': 'فتح إعدادات الموقع',
+              'net_note': 'يُقسَّم الاستهلاك حسب الشبكة منذ بدأ Dataly المراقبة؛ لا يمكن تقسيم ما سبق. الأرقام تقريبية.',
+              'net_empty': 'لا يوجد استهلاك مسجّل لكل شبكة بعد. استخدم هاتفك قليلاً ثم عد.',
             },
             'fr': {
               'perm': 'Pour lire la consommation de chaque appli, Dataly a besoin de l’accès aux données d’utilisation.\nActivez Dataly sur l’écran suivant puis revenez.',
@@ -1488,6 +1754,20 @@ jobs:
               'bk_title': '{app} est bloquée', 'bk_body': 'Limite atteinte. Son accès Internet est coupé jusqu’à la fin de la période.', 'bkv_title': 'Impossible de bloquer {app}', 'bkv_body': 'Le blocage nécessite le VPN de Dataly : un autre VPN est peut-être actif ou l’autorisation a été retirée. Ouvrez Dataly pour corriger.',
               'pick': 'Choisir une date', 'nodata': 'Aucune conso enregistrée pour cette date. L’historique commence le jour où Dataly a commencé à enregistrer.', 'total': 'Total',
               'lockall': 'Tout verrouiller', 'unlockall': 'Tout déverrouiller', 'lockall_q': 'Couper Internet pour {n} applis jusqu’à ce que vous les déverrouilliez ?', 'cancel': 'Annuler', 'locked': 'Verrouillée',
+              'vpn_c_title': 'Autorisation VPN requise',
+              'vpn_c_body': 'Dataly utilise le service VPN d’Android uniquement comme pare-feu local. Il envoie les applis que vous verrouillez, ou qui ont atteint leur limite, dans un tunnel vide : elles n’ont plus Internet. Les autres applis ne sont pas affectées. Aucune donnée ne quitte votre téléphone, aucun trafic n’est lu, collecté ni envoyé à un serveur, et aucun VPN distant n’est utilisé. Android va maintenant vous demander de confirmer.',
+              'agree': 'Accepter',
+              'nets_tab': 'Réseaux',
+              'net_now': 'Connecté maintenant',
+              'net_none': 'Non connecté',
+              'wifi_unnamed': 'Wi‑Fi (nom masqué)',
+              'mob_unnamed': 'Données mobiles',
+              'net_used': 'Conso par réseau',
+              'net_apps': 'Applis sur ce réseau',
+              'net_loc': 'Android exige l’autorisation de localisation, avec la localisation activée, pour afficher les noms Wi‑Fi. Dataly ne lit ni ne stocke jamais votre position.',
+              'net_loc_on': 'Ouvrir les réglages de localisation',
+              'net_note': 'La conso est répartie par réseau depuis que Dataly a commencé à surveiller ; l’historique antérieur ne peut pas être réparti. Les chiffres sont approximatifs.',
+              'net_empty': 'Aucune conso enregistrée par réseau pour l’instant. Utilisez votre téléphone un moment puis revenez.',
             },
             'es': {
               'perm': 'Para leer el consumo de cada app, Dataly necesita “Acceso al uso”.\nActívalo en la siguiente pantalla y vuelve.',
@@ -1507,6 +1787,20 @@ jobs:
               'bk_title': '{app} está bloqueada', 'bk_body': 'Límite alcanzado. Su Internet queda cortado hasta que termine el periodo.', 'bkv_title': 'No se pudo bloquear {app}', 'bkv_body': 'El bloqueo necesita la VPN de Dataly: puede haber otra VPN activa o se retiró el permiso. Abre Dataly para solucionarlo.',
               'pick': 'Elegir fecha', 'nodata': 'No hay consumo registrado en esta fecha. El historial empieza el día en que Dataly comenzó a registrar.', 'total': 'Total',
               'lockall': 'Bloquear todo', 'unlockall': 'Desbloquear todo', 'lockall_q': '¿Cortar Internet a {n} apps hasta que las desbloquees?', 'cancel': 'Cancelar', 'locked': 'Con candado',
+              'vpn_c_title': 'Se necesita permiso de VPN',
+              'vpn_c_body': 'Dataly usa el servicio VPN de Android solo como cortafuegos local. Envía las apps que bloqueas, o que alcanzaron su límite, a un túnel vacío para que no tengan Internet. Las demás apps no se ven afectadas. Ningún dato sale de tu teléfono, no se lee, recopila ni envía tráfico a ningún servidor y no se usa ninguna VPN remota. Android te pedirá ahora que confirmes.',
+              'agree': 'Aceptar',
+              'nets_tab': 'Redes',
+              'net_now': 'Conectado ahora',
+              'net_none': 'Sin conexión',
+              'wifi_unnamed': 'Wi‑Fi (nombre oculto)',
+              'mob_unnamed': 'Datos móviles',
+              'net_used': 'Consumo por red',
+              'net_apps': 'Apps en esta red',
+              'net_loc': 'Android necesita el permiso de ubicación, con la ubicación activada, para mostrar los nombres de Wi‑Fi. Dataly nunca lee ni guarda tu ubicación.',
+              'net_loc_on': 'Abrir ajustes de ubicación',
+              'net_note': 'El consumo se divide por red desde que Dataly empezó a vigilar; lo anterior no se puede dividir. Las cifras son aproximadas.',
+              'net_empty': 'Aún no hay consumo registrado por red. Usa el teléfono un rato y vuelve.',
             },
             'tr': {
               'perm': 'Her uygulamanın kullanımını okumak için Dataly’nin “Kullanım erişimi” iznine ihtiyacı var.\nBir sonraki ekranda etkinleştirip geri dönün.',
@@ -1526,6 +1820,20 @@ jobs:
               'bk_title': '{app} engellendi', 'bk_body': 'Limite ulaşıldı. Dönem sıfırlanana kadar interneti kesildi.', 'bkv_title': '{app} engellenemedi', 'bkv_body': 'Engelleme Dataly’nin VPN’ini gerektirir: başka bir VPN açık olabilir veya izin geri alınmış olabilir. Düzeltmek için Dataly’yi açın.',
               'pick': 'Tarih seç', 'nodata': 'Bu tarih için kayıtlı kullanım yok. Geçmiş, Dataly’nin kayda başladığı günden itibaren tutulur.', 'total': 'Toplam',
               'lockall': 'Tümünü kilitle', 'unlockall': 'Tüm kilitleri aç', 'lockall_q': '{n} uygulamanın interneti siz kilidi açana kadar kesilsin mi?', 'cancel': 'İptal', 'locked': 'Kilitli',
+              'vpn_c_title': 'VPN izni gerekli',
+              'vpn_c_body': 'Dataly, Android’in VPN hizmetini yalnızca yerel bir güvenlik duvarı olarak kullanır. Kilitlediğiniz veya limitine ulaşan uygulamaları boş bir tünele yönlendirir; böylece internetleri olmaz. Diğer uygulamalar etkilenmez. Telefonunuzdan hiçbir veri çıkmaz, ağ trafiği okunmaz, toplanmaz veya hiçbir sunucuya gönderilmez ve uzak VPN kullanılmaz. Android şimdi onayınızı isteyecek.',
+              'agree': 'Kabul et',
+              'nets_tab': 'Ağlar',
+              'net_now': 'Şu an bağlı',
+              'net_none': 'Bağlı değil',
+              'wifi_unnamed': 'Wi‑Fi (ad gizli)',
+              'mob_unnamed': 'Mobil veri',
+              'net_used': 'Ağa göre kullanım',
+              'net_apps': 'Bu ağdaki uygulamalar',
+              'net_loc': 'Android, Wi‑Fi adlarını göstermek için Konum izni ve açık Konum gerektirir. Dataly konumunuzu asla okumaz veya saklamaz.',
+              'net_loc_on': 'Konum ayarlarını aç',
+              'net_note': 'Kullanım, Dataly izlemeye başladığı andan itibaren ağa göre ayrılır; öncesi bölünemez. Rakamlar yaklaşıktır.',
+              'net_empty': 'Henüz ağ başına kullanım kaydedilmedi. Telefonu bir süre kullanıp tekrar bakın.',
             },
             'de': {
               'perm': 'Um den Verbrauch jeder App zu lesen, braucht Dataly den „Nutzungszugriff“.\nAktiviere Dataly im nächsten Bildschirm und kehre zurück.',
@@ -1545,6 +1853,20 @@ jobs:
               'bk_title': '{app} ist gesperrt', 'bk_body': 'Limit erreicht. Das Internet ist bis zum Ende des Zeitraums gesperrt.', 'bkv_title': '{app} konnte nicht gesperrt werden', 'bkv_body': 'Die Sperre braucht das VPN von Dataly: Ein anderes VPN ist aktiv oder die Berechtigung fehlt. Öffne Dataly, um es zu beheben.',
               'pick': 'Datum wählen', 'nodata': 'Für dieses Datum wurde kein Verbrauch erfasst. Der Verlauf beginnt an dem Tag, an dem Dataly mit der Aufzeichnung begann.', 'total': 'Gesamt',
               'lockall': 'Alle sperren', 'unlockall': 'Alle entsperren', 'lockall_q': 'Internet für {n} Apps sperren, bis du sie wieder entsperrst?', 'cancel': 'Abbrechen', 'locked': 'Verriegelt',
+              'vpn_c_title': 'VPN-Berechtigung erforderlich',
+              'vpn_c_body': 'Dataly nutzt den VPN-Dienst von Android nur als lokale Firewall. Gesperrte Apps oder Apps, die ihr Limit erreicht haben, werden in einen leeren Tunnel geleitet und haben kein Internet. Andere Apps sind nicht betroffen. Es verlassen keine Daten dein Gerät, Netzwerkverkehr wird weder gelesen noch gesammelt oder an einen Server gesendet, und es wird kein entferntes VPN verwendet. Android fragt dich jetzt nach der Bestätigung.',
+              'agree': 'Zustimmen',
+              'nets_tab': 'Netzwerke',
+              'net_now': 'Jetzt verbunden',
+              'net_none': 'Nicht verbunden',
+              'wifi_unnamed': 'WLAN (Name verborgen)',
+              'mob_unnamed': 'Mobile Daten',
+              'net_used': 'Verbrauch pro Netzwerk',
+              'net_apps': 'Apps in diesem Netzwerk',
+              'net_loc': 'Android benötigt die Standortberechtigung bei eingeschaltetem Standort, um WLAN-Namen anzuzeigen. Dataly liest oder speichert deinen Standort nie.',
+              'net_loc_on': 'Standorteinstellungen öffnen',
+              'net_note': 'Der Verbrauch wird ab dem Zeitpunkt, an dem Dataly zu beobachten begann, nach Netzwerk aufgeteilt; früherer Verbrauch lässt sich nicht aufteilen. Werte sind ungefähr.',
+              'net_empty': 'Noch kein Verbrauch pro Netzwerk erfasst. Nutze dein Handy eine Weile und schau dann wieder nach.',
             },
             'ru': {
               'perm': 'Чтобы читать расход каждого приложения, Dataly нужен «Доступ к данным об использовании».\nВключите Dataly на следующем экране и вернитесь.',
@@ -1564,6 +1886,20 @@ jobs:
               'bk_title': '{app} заблокировано', 'bk_body': 'Лимит достигнут. Интернет отключён до конца периода.', 'bkv_title': 'Не удалось заблокировать {app}', 'bkv_body': 'Для блокировки нужен VPN Dataly: возможно, включён другой VPN или разрешение отозвано. Откройте Dataly, чтобы исправить.',
               'pick': 'Выбрать дату', 'nodata': 'За эту дату расход не записан. История ведётся с того дня, когда Dataly начал запись.', 'total': 'Итого',
               'lockall': 'Заблокировать все', 'unlockall': 'Разблокировать все', 'lockall_q': 'Отключить интернет для {n} приложений, пока вы их не разблокируете?', 'cancel': 'Отмена', 'locked': 'Заперто',
+              'vpn_c_title': 'Нужно разрешение VPN',
+              'vpn_c_body': 'Dataly использует VPN-службу Android только как локальный брандмауэр. Заблокированные приложения и приложения, достигшие лимита, направляются в пустой туннель и остаются без интернета. Остальные приложения не затрагиваются. Никакие данные не покидают телефон, трафик не читается, не собирается и не отправляется на серверы, удалённый VPN не используется. Сейчас Android попросит подтверждение.',
+              'agree': 'Согласен',
+              'nets_tab': 'Сети',
+              'net_now': 'Подключено сейчас',
+              'net_none': 'Нет подключения',
+              'wifi_unnamed': 'Wi‑Fi (имя скрыто)',
+              'mob_unnamed': 'Мобильные данные',
+              'net_used': 'Расход по сетям',
+              'net_apps': 'Приложения в этой сети',
+              'net_loc': 'Чтобы показывать имена Wi‑Fi, Android требует разрешение на геолокацию при включённой геолокации. Dataly никогда не читает и не хранит ваше местоположение.',
+              'net_loc_on': 'Открыть настройки геолокации',
+              'net_note': 'Расход делится по сетям с момента, когда Dataly начал наблюдение; более ранний расход разделить нельзя. Цифры приблизительные.',
+              'net_empty': 'Расход по сетям пока не записан. Поработайте с телефоном и загляните позже.',
             },
             'id': {
               'perm': 'Untuk membaca pemakaian tiap aplikasi, Dataly memerlukan “Akses penggunaan”.\nAktifkan Dataly di layar berikutnya lalu kembali.',
@@ -1583,6 +1919,20 @@ jobs:
               'bk_title': '{app} diblokir', 'bk_body': 'Batas tercapai. Internetnya diputus hingga periode berakhir.', 'bkv_title': 'Tidak bisa memblokir {app}', 'bkv_body': 'Pemblokiran memerlukan VPN Dataly: mungkin VPN lain aktif atau izin dicabut. Buka Dataly untuk memperbaikinya.',
               'pick': 'Pilih tanggal', 'nodata': 'Tidak ada pemakaian tercatat pada tanggal ini. Riwayat dimulai sejak hari Dataly mulai mencatat.', 'total': 'Total',
               'lockall': 'Kunci semua', 'unlockall': 'Buka semua', 'lockall_q': 'Putus internet untuk {n} aplikasi hingga Anda membukanya?', 'cancel': 'Batal', 'locked': 'Terkunci',
+              'vpn_c_title': 'Izin VPN diperlukan',
+              'vpn_c_body': 'Dataly memakai layanan VPN Android hanya sebagai firewall lokal. Aplikasi yang Anda kunci, atau yang mencapai batasnya, diarahkan ke terowongan kosong sehingga tidak punya internet. Aplikasi lain tidak terpengaruh. Tidak ada data yang keluar dari ponsel, lalu lintas tidak dibaca, dikumpulkan, atau dikirim ke server mana pun, dan tidak ada VPN jarak jauh. Android akan meminta konfirmasi Anda sekarang.',
+              'agree': 'Setuju',
+              'nets_tab': 'Jaringan',
+              'net_now': 'Terhubung sekarang',
+              'net_none': 'Tidak terhubung',
+              'wifi_unnamed': 'Wi‑Fi (nama disembunyikan)',
+              'mob_unnamed': 'Data seluler',
+              'net_used': 'Pemakaian per jaringan',
+              'net_apps': 'Aplikasi di jaringan ini',
+              'net_loc': 'Android memerlukan izin Lokasi dengan Lokasi aktif untuk menampilkan nama Wi‑Fi. Dataly tidak pernah membaca atau menyimpan lokasi Anda.',
+              'net_loc_on': 'Buka pengaturan lokasi',
+              'net_note': 'Pemakaian dibagi per jaringan sejak Dataly mulai memantau; pemakaian sebelumnya tidak bisa dibagi. Angkanya perkiraan.',
+              'net_empty': 'Belum ada pemakaian per jaringan. Gunakan ponsel sebentar lalu cek lagi.',
             },
           };
 
@@ -1656,6 +2006,29 @@ jobs:
                   _list(m['swifi']),
                   _list(m['smobile']),
                 );
+          }
+
+          /// Usage of one network ("w:<Wi-Fi name>" or "m:<carrier>"; name "?" = unknown).
+          class NetUse {
+            final String net;
+            final num bytes;
+            const NetUse(this.net, this.bytes);
+            bool get isWifi => net.startsWith('w:');
+            String get name => net.length > 2 ? net.substring(2) : '?';
+          }
+
+          class NetApp {
+            final String pkg, name;
+            final int uid;
+            final num bytes;
+            const NetApp(this.pkg, this.name, this.uid, this.bytes);
+            factory NetApp.fromMap(Map m) => NetApp(
+                  (m['pkg'] as String?) ?? '',
+                  (m['name'] as String?) ?? '',
+                  (m['uid'] as num?)?.toInt() ?? 0,
+                  (m['bytes'] as num?) ?? 0,
+                );
+            bool get isReal => pkg.isNotEmpty && !pkg.startsWith('uid:');
           }
 
           // ---------------------------------------------------------------- periods
@@ -1755,6 +2128,19 @@ jobs:
             }
 
             static Future<Uint8List?> icon(String pkg) async => _ch.invokeMethod<Uint8List>('icon', {'pkg': pkg});
+            static Future<Map<String, dynamic>> netNow() async => _m(await _ch.invokeMethod('netNow'));
+            static Future<List<Map<String, dynamic>>> netUsage(int s, int e) async {
+              final l = await _ch.invokeMethod<List>('netUsage', {'s': s, 'e': e}) ?? const [];
+              return l.map((x) => Map<String, dynamic>.from(x as Map)).toList();
+            }
+
+            static Future<List<Map<String, dynamic>>> netApps(String net, int s, int e) async {
+              final l = await _ch.invokeMethod<List>('netApps', {'net': net, 's': s, 'e': e}) ?? const [];
+              return l.map((x) => Map<String, dynamic>.from(x as Map)).toList();
+            }
+
+            static Future<void> openLocationSettings() async => _ch.invokeMethod('openLocationSettings');
+            static Future<void> setConsent() async => _ch.invokeMethod('setConsent');
             static Future<void> setLocked(List<String> pkgs, bool on) async =>
                 _ch.invokeMethod('setLocked', {'pkgs': pkgs, 'on': on});
             static Future<Map<String, dynamic>> vpnState() async => _m(await _ch.invokeMethod('vpnState'));
@@ -1770,6 +2156,9 @@ jobs:
           // ======================================================================
           // ui.dart
           // ======================================================================
+          /// Lets AppState show a dialog from anywhere (used for the VPN disclosure).
+          final GlobalKey<NavigatorState> navKey = GlobalKey<NavigatorState>();
+
           const kBg = Color(0xFF0A0E1A);
           const kCard = Color(0xFF141A2B);
           const kWifi = Color(0xFF5B8CFF);
@@ -1966,6 +2355,11 @@ jobs:
             bool speed = false, loading = false, notifOk = true, needPhone = false;
             bool vpnGranted = true, otherVpn = false;
             String vpnPolicy = 'skip';
+            bool vpnConsent = false; // user accepted the in-app VPN disclosure
+            Map<String, dynamic> netNow = {}; // what the device is connected to right now
+            List<NetUse> nets = []; // usage per network for the selected period
+            final Map<String, List<NetApp>> _netAppCache = {};
+            int _netReq = 0;
             Set<String> locked = {}; // apps the user locked by hand (no internet until unlocked)
             final Map<String, Uint8List> iconCache = {};
             final Set<String> _noIcon = {};
@@ -1995,6 +2389,7 @@ jobs:
                 sdk = (st['sdk'] as num?)?.toInt() ?? 0;
                 billing = (st['bill'] as num?)?.toInt() ?? 1;
                 vpnPolicy = (st['vpn_policy'] as String?) ?? 'skip';
+                vpnConsent = st['vpn_consent'] == true;
                 locked = ((st['locked'] as List?) ?? const []).map((x) => x as String).toSet();
                 final hs = (st['hist_start'] as num?)?.toInt() ?? 0;
                 histStart = hs > 0 ? DateTime.fromMillisecondsSinceEpoch(hs) : null;
@@ -2157,7 +2552,33 @@ jobs:
             }
 
             /// Shows Android's VPN consent dialog if needed.
+            /// Google Play "prominent disclosure": explained inside the app, accepted with a tap, before Android's own VPN dialog.
+            Future<bool> _consentVpn() async {
+              if (vpnConsent) return true;
+              final ctx = navKey.currentState?.overlay?.context;
+              if (ctx == null) return false;
+              final ok = await showDialog<bool>(
+                context: ctx,
+                barrierDismissible: false,
+                builder: (c) => AlertDialog(
+                  title: Text(t('vpn_c_title')),
+                  content: SingleChildScrollView(child: Text(t('vpn_c_body'), style: const TextStyle(height: 1.5))),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c, false), child: Text(t('cancel'))),
+                    FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(t('agree'))),
+                  ],
+                ),
+              );
+              if (ok != true) return false;
+              vpnConsent = true;
+              try {
+                await Native.setConsent();
+              } catch (_) {}
+              return true;
+            }
+
             Future<void> ensureVpn() async {
+              if (!await _consentVpn()) return;
               try {
                 vpnGranted = await Native.prepareVpn();
               } catch (_) {}
@@ -2221,6 +2642,7 @@ jobs:
                 wifiSeries = ((m['swifi'] as List?) ?? const []).map((x) => x as num).toList();
                 mobSeries = ((m['smobile'] as List?) ?? const []).map((x) => x as num).toList();
                 usage = ((m['usage'] as List?) ?? const []).map((x) => AppUse.fromMap(x as Map)).toList();
+                unawaited(loadNets());
               } catch (e) {
                 if (id == _req) error = '$e';
               } finally {
@@ -2229,6 +2651,39 @@ jobs:
                   notifyListeners();
                 }
               }
+            }
+
+            /// Current connection + usage per network for the selected period.
+            Future<void> loadNets() async {
+              final id = ++_netReq;
+              try {
+                final now = await Native.netNow();
+                final r = rangeFor(pi, billing, custom);
+                final list = await Native.netUsage(r.s, r.e);
+                if (id != _netReq) return;
+                netNow = now;
+                nets = list.map((m) => NetUse(m['net'] as String, (m['bytes'] as num?) ?? 0)).toList();
+                _netAppCache.clear();
+                notifyListeners();
+              } catch (_) {}
+            }
+
+            /// Apps that used the internet on [net] during the selected period.
+            Future<List<NetApp>> netApps(String net) async {
+              final r = rangeFor(pi, billing, custom);
+              final key = '$net|${r.s}|${r.e}';
+              final cached = _netAppCache[key];
+              if (cached != null) return cached;
+              final l = (await Native.netApps(net, r.s, r.e)).map(NetApp.fromMap).toList();
+              _netAppCache[key] = l;
+              return l;
+            }
+
+            /// Location permission is only used by Android to reveal the Wi-Fi name.
+            Future<void> allowLocation() async {
+              final r = await Permission.locationWhenInUse.request();
+              if (r.isPermanentlyDenied) await openAppSettings();
+              await loadNets();
             }
 
             Future<void> loadStatus() async {
@@ -2945,6 +3400,178 @@ jobs:
           // ======================================================================
           // home.dart
           // ======================================================================
+          String appDisplayName(AppState s, String name, int uid, String pkg) {
+            if (name.isNotEmpty) return name;
+            if (uid == -4) return s.t('removed');
+            if (uid == -5) return s.t('teth');
+            return uid != 0 ? s.t('sys') : pkg;
+          }
+
+          class NetworksTab extends StatelessWidget {
+            final AppState s;
+            const NetworksTab({super.key, required this.s});
+
+            String _label(NetUse n) => n.name == '?' ? s.t(n.isWifi ? 'wifi_unnamed' : 'mob_unnamed') : n.name;
+
+            @override
+            Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (c, _) => _body(c));
+
+            Widget _nowRow(IconData icon, Color color, String text) => Row(children: [
+                  Icon(icon, color: color),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600))),
+                ]);
+
+            Widget _body(BuildContext context) {
+              final nn = s.netNow;
+              final wifiOn = nn['wifiConnected'] == true;
+              final wName = (nn['wifiName'] as String?) ?? '';
+              final mName = (nn['mobile'] as String?) ?? '';
+              final fine = nn['fine'] == true;
+              final locOn = nn['locOn'] != false;
+              final needLoc = wifiOn && wName.isEmpty && (!fine || !locOn);
+              final num mx = s.nets.isEmpty ? 1 : s.nets.first.bytes;
+
+              return RefreshIndicator(
+                onRefresh: s.loadNets,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Text(s.t('nets_tab'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: [
+                        for (var i = 0; i < periodKeys.length; i++)
+                          Padding(
+                            padding: const EdgeInsetsDirectional.only(end: 8),
+                            child: ChoiceChip(
+                              avatar: i == 5 ? const Icon(Icons.calendar_month_rounded, size: 18) : null,
+                              label: Text(i == 5 && s.pi == 5 && s.custom != null ? rangeLabel(context, s.custom!) : s.t(periodKeys[i])),
+                              selected: s.pi == i,
+                              onSelected: (_) => i == 5 ? UsageTab(s: s)._pick(context) : s.setPeriod(i),
+                            ),
+                          ),
+                      ]),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: cardBox(),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(s.t('net_now'), style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                        const SizedBox(height: 10),
+                        _nowRow(
+                          wifiOn ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                          wifiOn ? kWifi : Colors.white38,
+                          wifiOn ? (wName.isEmpty ? s.t('wifi_unnamed') : wName) : s.t('net_none'),
+                        ),
+                        const SizedBox(height: 10),
+                        _nowRow(Icons.signal_cellular_alt_rounded, kMob, mName.isEmpty ? s.t('mob_unnamed') : mName),
+                      ]),
+                    ),
+                    const SizedBox(height: 12),
+                    if (needLoc)
+                      InfoBanner(
+                        icon: Icons.location_on_rounded,
+                        text: s.t('net_loc'),
+                        action: s.t(!fine ? 'allow' : 'net_loc_on'),
+                        onAction: !fine ? s.allowLocation : Native.openLocationSettings,
+                      ),
+                    const SizedBox(height: 4),
+                    Text(s.t('net_used'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(s.t('net_note'), style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.5)),
+                    const SizedBox(height: 10),
+                    if (s.nets.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: Text(s.t('net_empty'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, height: 1.5)),
+                        ),
+                      ),
+                    for (final n in s.nets)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: cardBox(),
+                        child: Theme(
+                          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                          child: ExpansionTile(
+                            shape: const Border(),
+                            collapsedShape: const Border(),
+                            leading: Icon(n.isWifi ? Icons.wifi_rounded : Icons.signal_cellular_alt_rounded, color: n.isWifi ? kWifi : kMob),
+                            title: Text(_label(n), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: LinearProgressIndicator(
+                                value: (n.bytes / mx).toDouble(),
+                                minHeight: 5,
+                                borderRadius: BorderRadius.circular(4),
+                                color: n.isWifi ? kWifi : kMob,
+                                backgroundColor: Colors.white12,
+                              ),
+                            ),
+                            trailing: Text(fmt(n.bytes), style: const TextStyle(fontWeight: FontWeight.w700)),
+                            children: [_NetApps(s: s, net: n.net)],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }
+          }
+
+          /// Apps that used the internet on one network (loaded when the tile is expanded).
+          class _NetApps extends StatefulWidget {
+            final AppState s;
+            final String net;
+            const _NetApps({required this.s, required this.net});
+            @override
+            State<_NetApps> createState() => _NetAppsState();
+          }
+
+          class _NetAppsState extends State<_NetApps> {
+            late final Future<List<NetApp>> f = widget.s.netApps(widget.net);
+
+            @override
+            Widget build(BuildContext context) => FutureBuilder<List<NetApp>>(
+                  future: f,
+                  builder: (c, snap) {
+                    if (snap.connectionState != ConnectionState.done) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                      );
+                    }
+                    final l = snap.data ?? const <NetApp>[];
+                    if (l.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('—'));
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Column(children: [
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Padding(
+                            padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 4),
+                            child: Text(widget.s.t('net_apps'), style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                          ),
+                        ),
+                        for (final a in l.take(30))
+                          ListTile(
+                            dense: true,
+                            leading: a.isReal
+                                ? AppIcon(s: widget.s, pkg: a.pkg, name: a.name.isEmpty ? a.pkg : a.name, size: 34)
+                                : avatar(appDisplayName(widget.s, a.name, a.uid, a.pkg), size: 34),
+                            title: Text(appDisplayName(widget.s, a.name, a.uid, a.pkg), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            trailing: Text(fmt(a.bytes), style: const TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                      ]),
+                    );
+                  },
+                );
+          }
+
           class Home extends StatefulWidget {
             final AppState state;
             const Home({super.key, required this.state});
@@ -2987,7 +3614,7 @@ jobs:
                       body: SafeArea(
                         child: IndexedStack(
                           index: tab,
-                          children: [UsageTab(s: s), ControlTab(s: s)],
+                          children: [UsageTab(s: s), NetworksTab(s: s), ControlTab(s: s)],
                         ),
                       ),
                       bottomNavigationBar: NavigationBar(
@@ -2995,6 +3622,7 @@ jobs:
                         onDestinationSelected: (i) => setState(() => tab = i),
                         destinations: [
                           NavigationDestination(icon: const Icon(Icons.bar_chart_rounded), label: s.t('tu')),
+                          NavigationDestination(icon: const Icon(Icons.wifi_rounded), label: s.t('nets_tab')),
                           NavigationDestination(icon: const Icon(Icons.tune_rounded), label: s.t('tc')),
                         ],
                       ),
@@ -3196,6 +3824,7 @@ jobs:
             @override
             Widget build(BuildContext context) => MaterialApp(
                   debugShowCheckedModeBanner: false,
+                  navigatorKey: navKey,
                   title: 'Dataly',
                   locale: Locale(_lang.isEmpty ? 'en' : _lang),
                   supportedLocales: [for (final k in langs.keys) Locale(k)],
@@ -3215,27 +3844,346 @@ jobs:
           }
           EOF
 
+      - name: Write launcher icon
+        run: |
+          cat << 'EOF' | base64 -d > icon192.png
+          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
+          EOF
+          RES=app_build/android/app/src/main/res
+          rm -rf $RES/mipmap-anydpi-v26
+          if ! command -v convert >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y imagemagick; fi
+          for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            d=${pair%%:*}; s=${pair##*:}
+            mkdir -p $RES/mipmap-$d
+            convert icon192.png -resize ${s}x${s} $RES/mipmap-$d/ic_launcher.png
+          done
+
       - name: Install Android SDK Platform 37 (optional, Gradle also auto-downloads it)
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platforms;android-37.0" || "$SDKM" "platforms;android-37" || echo "Platform 37 will be fetched by Gradle"
 
-      - name: Build release APK
+      - name: Set up release signing (only when the keystore secrets exist)
         working-directory: app_build
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No KEYSTORE_BASE64 secret: the build is signed with the DEBUG key and cannot be uploaded to Google Play."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          python3 - <<'PY'
+          import pathlib
+          p = next(pathlib.Path('android/app').glob('build.gradle*'))
+          t = p.read_text()
+          if p.suffix == '.kts':
+              block = '''    signingConfigs {
+                  create("release") {
+                      storeFile = file("upload-keystore.jks")
+                      storePassword = System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias = System.getenv("KEY_ALIAS")
+                      keyPassword = System.getenv("KEY_PASSWORD")
+                  }
+              }
+
+          '''
+              t2 = t.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
+          else:
+              block = '''    signingConfigs {
+                  release {
+                      storeFile file("upload-keystore.jks")
+                      storePassword System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("KEY_ALIAS")
+                      keyPassword System.getenv("KEY_PASSWORD")
+                  }
+              }
+
+          '''
+              t2 = t.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+          assert t2 != t, 'debug signingConfig line not found in ' + str(p)
+          assert '    buildTypes {' in t2, 'buildTypes block not found'
+          t2 = t2.replace('    buildTypes {', block + '    buildTypes {', 1)
+          p.write_text(t2)
+          print('release signing configured in', p)
+          PY
+
+      - name: Build release AAB + APK
+        working-directory: app_build
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           # permission_handler 13 needs compileSdk 37; the Flutter template uses 36.
           # Notification channels / foreground service need minSdk 26.
+          # Google Play requires new apps to target Android 16 (API 36).
           sed -i 's/flutter\.minSdkVersion/26/' android/app/build.gradle*
           sed -i 's/flutter\.compileSdkVersion/37/' android/app/build.gradle*
+          sed -i 's/flutter\.targetSdkVersion/36/' android/app/build.gradle*
           echo "android.suppressUnsupportedCompileSdk=37" >> android/gradle.properties
-          grep -n "compileSdk\|minSdk" android/app/build.gradle*
+          grep -n "compileSdk\|minSdk\|targetSdk\|signingConfig" android/app/build.gradle*
           flutter pub get
           # prints every Dart error in one short list (does not stop the build)
           flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | grep -E "error|Analyzing|issues? found|No issues" || true
-          flutter build apk --release
+          flutter build appbundle --release --build-name=1.0.0 --build-number=${{ github.run_number }}
+          flutter build apk --release --build-name=1.0.0 --build-number=${{ github.run_number }}
 
-      - name: Upload APK
+      - name: Upload AAB (this is the file you upload to Google Play)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataly-aab
+          path: app_build/build/app/outputs/bundle/release/app-release.aab
+
+      - name: Upload APK (for installing directly on a phone)
         uses: actions/upload-artifact@v4
         with:
           name: dataly-apk
