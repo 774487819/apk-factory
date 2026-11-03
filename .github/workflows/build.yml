@@ -578,7 +578,7 @@ jobs:
               }
 
               /** Alerts at 80 %, 100 % and then every extra 50 % (150, 200 ...), once per period. */
-              fun checkLimits(c: Context) = synchronized(lock) { doCheck(c.applicationContext) }
+              fun checkLimits(c: Context) { synchronized(lock) { doCheck(c.applicationContext) } }
 
               private fun doCheck(c: Context) {
                   val l = limits(c)
@@ -818,8 +818,12 @@ jobs:
                   val m = Core.usageByUid(c, ConnectivityManager.TYPE_MOBILE, start, end)
                   val pm = c.packageManager
                   val rows = HashMap<String, LongArray>()
-                  for ((uid, u) in w) rows.getOrPut(pkgOf(pm, uid)) { LongArray(2) }[0] += u.total
-                  for ((uid, u) in m) rows.getOrPut(pkgOf(pm, uid)) { LongArray(2) }[1] += u.total
+                  for (en in w.entries) {
+                      rows.getOrPut(pkgOf(pm, en.key)) { LongArray(2) }[0] += en.value.total
+                  }
+                  for (en in m.entries) {
+                      rows.getOrPut(pkgOf(pm, en.key)) { LongArray(2) }[1] += en.value.total
+                  }
                   rows[TOTAL] = longArrayOf(
                       Core.device(c, ConnectivityManager.TYPE_WIFI, start, end),
                       Core.device(c, ConnectivityManager.TYPE_MOBILE, start, end)
@@ -833,8 +837,11 @@ jobs:
                       }
                       d.beginTransaction()
                       try {
-                          for ((k, v) in rows) {
-                              old[k]?.let { o -> v[0] = maxOf(v[0], o[0]); v[1] = maxOf(v[1], o[1]) }
+                          for (en in rows.entries) {
+                              val k = en.key
+                              val v = en.value
+                              val o = old[k]
+                              if (o != null) { v[0] = maxOf(v[0], o[0]); v[1] = maxOf(v[1], o[1]) }
                               if (k != TOTAL && v[0] + v[1] == 0L) continue
                               val cv = ContentValues()
                               cv.put("day", start); cv.put("pkg", k); cv.put("wifi", v[0]); cv.put("mobile", v[1])
@@ -885,14 +892,16 @@ jobs:
                   return out
               }
 
-              fun totals(c: Context, s: Long, e: Long) = pkgTotals(c, TOTAL, s, e)
+              fun totals(c: Context, s: Long, e: Long): LongArray = pkgTotals(c, TOTAL, s, e)
 
               fun addNet(c: Context, day: Long, rows: Map<String, Long>) {
                   synchronized(this) {
                       val d = db(c)
                       d.beginTransaction()
                       try {
-                          for ((k, v) in rows) {
+                          for (en in rows.entries) {
+                              val k = en.key
+                              val v = en.value
                               val i = k.lastIndexOf('|')          // the Wi-Fi name may contain '|', the package never does
                               val net = k.substring(0, i)
                               val pkg = k.substring(i + 1)
@@ -966,16 +975,16 @@ jobs:
                       db(c).rawQuery(
                           "SELECT day, pkg, wifi, mobile FROM daily WHERE day>=? AND day<? ORDER BY day, pkg",
                           arrayOf(s.toString(), e.toString())
-                      ).use {
-                          while (it.moveToNext()) {
-                              val pkg = it.getString(1)
+                      ).use { cur ->
+                          while (cur.moveToNext()) {
+                              val pkg = cur.getString(1)
                               val name = when {
                                   pkg == TOTAL -> "TOTAL"
                                   pkg.startsWith("uid:") -> pkg
                                   else -> names.getOrPut(pkg) { Core.appLabel(c, pkg) }
                               }
                               val pk = if (pkg == TOTAL) "" else pkg
-                              w.write("${df.format(Date(it.getLong(0)))},${q(name)},${q(pk)},${it.getLong(2)},${it.getLong(3)}\n")
+                              w.write("${df.format(Date(cur.getLong(0)))},${q(name)},${q(pk)},${cur.getLong(2)},${cur.getLong(3)}\n")
                           }
                       }
                   }
@@ -1036,13 +1045,16 @@ jobs:
                   } catch (_: Exception) {}
               }
 
-              fun tick(c: Context, force: Boolean = false) = synchronized(lock) { doTick(c.applicationContext, force) }
+              fun tick(c: Context, force: Boolean = false) { synchronized(lock) { doTick(c.applicationContext, force) } }
 
               private fun doTick(c: Context, force: Boolean) {
                   if (!Core.hasUsageAccess(c)) return
                   val p = Core.prefs(c)
                   val now = System.currentTimeMillis()
-                  val (wc, wname, wid) = wifiInfo(c)
+                  val wi = wifiInfo(c)
+                  val wc = wi.first
+                  val wname = wi.second
+                  val wid = wi.third
                   val prevW = p.getString("nl_w", "") ?: ""
                   val prevM = p.getString("nl_m", "") ?: ""
                   var wkey = if (!wc) "" else "w:" + wname.ifEmpty { UNKNOWN }
@@ -1050,9 +1062,12 @@ jobs:
                   if (wc && wname.isEmpty() && wid >= 0 && wid == p.getInt("nl_wid", -2) && prevW.startsWith("w:")) wkey = prevW
                   val mkey = "m:" + mobileName(c).ifEmpty { UNKNOWN }
                   val last = p.getLong("nl_t", 0L)
-                  fun save() = p.edit().putLong("nl_t", now).putString("nl_w", wkey).putString("nl_m", mkey).putInt("nl_wid", wid).apply()
+                  val wkeyFinal = wkey
+                  val save = {
+                      p.edit().putLong("nl_t", now).putString("nl_w", wkeyFinal).putString("nl_m", mkey).putInt("nl_wid", wid).apply()
+                  }
                   if (last == 0L) { save(); return }
-                  val changed = wkey != prevW || mkey != prevM
+                  val changed = wkeyFinal != prevW || mkey != prevM
                   if (!changed && !force && now - last < 5 * 60_000L) return
                   closeSegment(c, maxOf(last, now - 7L * 86_400_000L), now, prevW, prevM)
                   save()
@@ -1071,9 +1086,13 @@ jobs:
               private fun attribute(c: Context, day: Long, a: Long, b: Long, wkey: String, mkey: String) {
                   val pm = c.packageManager
                   val rows = HashMap<String, Long>()
-                  fun add(net: String, pkg: String, v: Long) { if (v > 0) rows["$net|$pkg"] = (rows["$net|$pkg"] ?: 0L) + v }
-                  for ((uid, u) in Core.usageByUid(c, ConnectivityManager.TYPE_WIFI, a, b)) add(wkey, History.pkgOf(pm, uid), u.total)
-                  for ((uid, u) in Core.usageByUid(c, ConnectivityManager.TYPE_MOBILE, a, b)) add(mkey, History.pkgOf(pm, uid), u.total)
+                  fun add(net: String, pkg: String, v: Long) {
+                      if (v > 0) rows["$net|$pkg"] = (rows["$net|$pkg"] ?: 0L) + v
+                  }
+                  val wmap = Core.usageByUid(c, ConnectivityManager.TYPE_WIFI, a, b)
+                  for (en in wmap.entries) add(wkey, History.pkgOf(pm, en.key), en.value.total)
+                  val mmap = Core.usageByUid(c, ConnectivityManager.TYPE_MOBILE, a, b)
+                  for (en in mmap.entries) add(mkey, History.pkgOf(pm, en.key), en.value.total)
                   if (rows.isNotEmpty()) History.addNet(c, day, rows)
               }
           }
@@ -1206,7 +1225,7 @@ jobs:
           // ---------------------------------------------------------------- SpeedTile
           /** Quick Settings tile that toggles the live-speed notification. */
           class SpeedTile : TileService() {
-              override fun onStartListening() = refresh()
+              override fun onStartListening() { refresh() }
 
               override fun onClick() {
                   val on = !Core.prefs(this).getBoolean("speed", false)
@@ -1428,8 +1447,9 @@ jobs:
                               "setLang" -> {
                                   val ed = Core.prefs(ctx).edit()
                                       .putString("lang", call.argument<String>("lang") ?: "en")
-                                  (call.argument<Map<String, Any?>>("strs") ?: emptyMap()).forEach { (k, v) ->
-                                      ed.putString("s_$k", v?.toString() ?: "")
+                                  val strs = call.argument<Map<String, Any?>>("strs") ?: emptyMap()
+                                  for (en in strs.entries) {
+                                      ed.putString("s_" + en.key, en.value?.toString() ?: "")
                                   }
                                   ed.apply()
                                   Core.ensureChannels(ctx)
@@ -1475,17 +1495,23 @@ jobs:
                                   val hourly = call.argument<Boolean>("hourly") ?: false
                                   History.syncRecent(ctx)
                                   val tot = History.totals(ctx, s, e)
-                                  val (sw, sm) = if (hourly) Core.hourly(ctx, s, e, n)
-                                                 else History.series(ctx, History.TOTAL, s, e, n)
-                                  val usage = History.perPkg(ctx, s, e).map { (k, v) ->
+                                  val ser = if (hourly) Core.hourly(ctx, s, e, n)
+                                            else History.series(ctx, History.TOTAL, s, e, n)
+                                  val sw = ser.first
+                                  val sm = ser.second
+                                  val usage = ArrayList<Map<String, Any>>()
+                                  val per = History.perPkg(ctx, s, e)
+                                  for (en in per.entries) {
+                                      val k = en.key
+                                      val v = en.value
                                       val isUid = k.startsWith("uid:")
-                                      mapOf(
+                                      usage.add(mapOf(
                                           "pkg" to k,
                                           "uid" to (if (isUid) (k.substring(4).toIntOrNull() ?: 0) else 0),
                                           "name" to (if (isUid) "" else Core.appLabel(ctx, k)),
                                           "wifi" to v[0],
                                           "mobile" to v[1]
-                                      )
+                                      ))
                                   }
                                   mapOf("wifi" to tot[0], "mobile" to tot[1], "swifi" to sw, "smobile" to sm, "usage" to usage)
                               }
@@ -1493,7 +1519,9 @@ jobs:
                               "detail" -> bg(res) {
                                   val pkg = call.argument<String>("pkg") ?: ""
                                   History.syncRecent(ctx)
-                                  val (w, m) = History.series(ctx, pkg, s, e, n)
+                                  val ser = History.series(ctx, pkg, s, e, n)
+                                  val w = ser.first
+                                  val m = ser.second
                                   val tot = History.pkgTotals(ctx, pkg, s, e)
                                   val now = System.currentTimeMillis()
                                   val uid = try { packageManager.getApplicationInfo(pkg, 0).uid } catch (_: Exception) { -1 }
@@ -1543,7 +1571,9 @@ jobs:
                               }
 
                               "netNow" -> bg(res) {
-                                  val (wc, wn, _) = NetLog.wifiInfo(ctx)
+                                  val wi = NetLog.wifiInfo(ctx)
+                                  val wc = wi.first
+                                  val wn = wi.second
                                   val fine = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
                                   val locOn = try { LocationManagerCompat.isLocationEnabled(ctx.getSystemService(LocationManager::class.java)) } catch (_: Exception) { true }
                                   mapOf("wifiConnected" to wc, "wifiName" to wn, "mobile" to NetLog.mobileName(ctx), "fine" to fine, "locOn" to locOn)
@@ -1556,7 +1586,9 @@ jobs:
 
                               "netApps" -> bg(res) {
                                   val net = call.argument<String>("net") ?: ""
-                                  NetLog.netApps(ctx, net, s, e).map { (pkg, bytes) ->
+                                  NetLog.netApps(ctx, net, s, e).map { pr ->
+                                      val pkg = pr.first
+                                      val bytes = pr.second
                                       val isUid = pkg.startsWith("uid:")
                                       mapOf(
                                           "pkg" to pkg,
@@ -3855,7 +3887,7 @@ jobs:
           N77Zr+xpAWJCsif6bVoDzAXLkz1XNnpgeeiBFUUPAMhehD8vJVqHsqfThb6CZc9SOlDbq9P50Rii
           p53suMLRA8w0ZK4hcw2MnojCuqJnyFxD5up6vrSE7Bky15C5uj4tNGSuIXMNjB5o6wcaMteQuXpE
           Txs/0JC5hszVO3qqOtCQuYbMNRB6albYkLmGzDUIegCqfqAhcw2ZawD0AAPBysbYh8x1ZTJXbS/Z
-          +WoOZc+QuZZAT9UK4yFzDZlrEPQwMA2Za8hcA6MnboUNs8OGzNU3eqDHhLIhcw3R0xY9zY7EIXMN
+          +WoOZc+QuZZAT9UK4yFzDZlrEPQwMA2Za8hcA6MnboUNs8OGzNU3eqDHhLIhcw3R0xY9zY7EIXOd
           masv9DQ4EoeyZ8hcfaKnHgsbomfIXH3LnmgTDZlryFwDoafqSBzKniFzDcBctQ1yiJ7KGiIAYHUl
           9iYCAjAAMyBy5YAaf+KHj7lqa/KHkrkAEBGxsr8xwMyhYsOsVeV4aiipHSFiBCAUBIgoCIkQMUIY
           Vz7yw8JctY/IHyLZg4iAgMxam1Cx0oYNIpJjC8eRE1mypLN+HQPIbNqeGGNjah9HojC/GMwtoCD/
@@ -3893,208 +3925,9 @@ jobs:
           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
-          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
+          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
           EOF
           RES=app_build/android/app/src/main/res
           rm -rf $RES/mipmap-anydpi-v26
@@ -4174,7 +4007,8 @@ jobs:
           flutter pub get
           # prints every Dart error in one short list (does not stop the build)
           flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | grep -E "error|Analyzing|issues? found|No issues" || true
-          flutter build appbundle --release --build-name=1.0.0 --build-number=${{ github.run_number }}
+          # print the real Kotlin errors (lines starting with "e:") if the build fails
+          flutter build appbundle --release --build-name=1.0.0 --build-number=${{ github.run_number }} 2>&1 | tee build.log || { echo "=== KOTLIN / GRADLE ERRORS ==="; grep -E "^e: |error:" build.log | head -40; exit 1; }
           flutter build apk --release --build-name=1.0.0 --build-number=${{ github.run_number }}
 
       - name: Upload AAB (this is the file you upload to Google Play)
